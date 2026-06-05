@@ -13,7 +13,8 @@ dist-ssr
 *.local
 .env
 .env.local
-_patches
+_pycache__
+chroma
 
 # Editor directories and files
 .vscode/*
