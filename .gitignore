@@ -15,6 +15,7 @@ dist-ssr
 .env.local
 _pycache__
 chroma
+data/
 
 
 # Editor directories and files
