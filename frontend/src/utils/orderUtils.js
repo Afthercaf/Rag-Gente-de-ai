@@ -1,14 +1,9 @@
-export const ORDER_KEYWORDS = [
-  "quiero pedir", "pedido", "ordenar", "comprar", "pizza",
-  "mandame", "envía", "quiero una", "quisiera",
-];
 
 /**
  * Devuelve true si el texto parece un pedido.
  * @param {string} text
  */
-export const isOrderQuery = (text) =>
-  ORDER_KEYWORDS.some((k) => text.toLowerCase().includes(k));
+
 
 /** Genera IDs únicos simples para mensajes. */
 let uid = 0;

@@ -49,30 +49,52 @@ def create_order(data: dict) -> str | None:
 
 
 def update_order_status(order_id: str, status: str) -> bool:
-    """Actualiza el estado de una orden existente."""
     try:
-        if not order_id:
-            logger.warning("update_order_status: order_id vacío")
-            return False
+
+        print(f"\n🔄 Actualizando pedido {order_id}")
+        print(f"📌 Nuevo estado: {status}")
 
         response = requests.patch(
             f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
             headers=HEADERS,
             json={"estado": status},
         )
-        if response.status_code in [200, 204]:
-            logger.info(f"Pedido {order_id} actualizado a: {status}")
-            return True
 
-        logger.warning(f"No se pudo actualizar pedido {order_id}: {response.text}")
-        return False
+        print("STATUS:", response.status_code)
+        print("BODY:", response.text)
+
+        if response.status_code not in [200, 204]:
+            return False
+
+        if response.status_code == 200:
+
+            try:
+                data = response.json()
+
+                print("DATA:", data)
+
+                if isinstance(data, list) and len(data) == 0:
+                    print("❌ No existe pedido con ese ID")
+                    return False
+
+            except Exception:
+                pass
+
+        print("✅ Pedido actualizado")
+
+        return True
+
     except Exception as e:
-        logger.error(f"Error en update_order_status: {e}")
+
+        print("❌ ERROR SUPABASE:", e)
+
         return False
-
-
 def get_order_status(order_id: str) -> str:
-    """Consulta el estado actual de una orden."""
+    """
+    Consulta el estado actual de una orden en Supabase.
+    Usado por el frontend para hacer polling y mostrar
+    al cliente las actualizaciones en tiempo casi-real.
+    """
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}&select=estado",

@@ -4,8 +4,12 @@ import client from "./axiosClient";
  * Envía un mensaje al chatbot.
  * @returns {{ reply: string, is_order?: boolean }}
  */
-export async function sendChat(message) {
-  const { data } = await client.post("/chat", { message });
+export async function sendChat(message, userId) {
+  const { data } = await client.post("/chat", {
+    user_id: userId,
+    message,
+  });
+
   return data;
 }
 
@@ -16,7 +20,7 @@ export async function sendChat(message) {
  * @param {object} ubicacion - { lat, lng, direccion_completa, ... } (opcional)
  * @returns {{ success, order_id, message }}
  */
-export async function placeOrder(pedido, form, ubicacion = null) {
+export async function placeOrder(user_id, pedido, form, ubicacion = null) {
   // Validaciones básicas
   if (!pedido || typeof pedido !== 'string') {
     throw new Error("El pedido es requerido");
@@ -27,6 +31,7 @@ export async function placeOrder(pedido, form, ubicacion = null) {
   }
   
   const payload = {
+    user_id,
     pedido: pedido.trim(),
     cliente_nombre: form.cliente_nombre.trim(),
     telefono: form.telefono || "",

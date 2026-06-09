@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { sendChat, placeOrder } from "../../api/chat";
 import { logout } from "../../api/auth";
 import { clearSession } from "../../utils/session";
-import { isOrderQuery, nextId, getOrderSteps } from "../../utils/orderUtils";
+import { nextId, getOrderSteps } from "../../utils/orderUtils";
 import { useOrderStatus } from "../../hooks/useOrderStatus.js";
 import { s } from "../../styles/theme";
 import { MessageBubble } from "./MessageBubble";
@@ -30,16 +30,20 @@ export default function ChatScreen({ user, onLogout }) {
 
   const { status: orderStatus, label: orderLabel, isDone } = useOrderStatus(activeOrderId);
 
+// ✅ CORRECTO — notifica cualquier cambio de estado
   useEffect(() => {
-    if (!activeOrderId) return;
-    if (orderStatus === "pendiente") return;
-    if (orderStatus === lastReportedStatus.current) return;
+   if (!activeOrderId) return;
+   if (orderStatus === lastReportedStatus.current) return;
 
     lastReportedStatus.current = orderStatus;
+
+  // No notificar el estado inicial "pendiente" — ya se mencionó al confirmar el pedido
+    if (orderStatus !== "pendiente") {
     addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
+    }
 
     if (isDone) setActiveOrderId(null);
-  }, [orderStatus, activeOrderId, isDone, orderLabel]);
+    }, [orderStatus, activeOrderId, isDone, orderLabel]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,43 +71,75 @@ export default function ChatScreen({ user, onLogout }) {
     addMsg("user", text);
     setInput("");
 
-    if (isOrderQuery(text)) {
-      setOrderForm({
-        pedido: text,
-        step: 0,
-        data: {
-          cliente_nombre: user?.nombre || "",
-          telefono: user?.telefono || "",
-          gmail: user?.gmail || "",
-          direccion: user?.direccion || "",
-        },
-      });
-      addMsg("bot", "¡Perfecto! 🛵 Voy a registrar tu pedido. Necesito algunos datos.");
-      return;
-    }
+
 
     setLoading(true);
     try {
-      const data = await sendChat(text);
+const data = await sendChat(
+  text,
+  user.id
+);
       addMsg("bot", data.reply);
       
       // Detectar si el bot sugiere pedido
-      if (data.is_order || data.reply.includes("PEDIDO:")) {
-        const orderText = extractOrderFromReply(data.reply);
-        // Guardar pedido pendiente
-        setPendingOrderData({
-          pedido: orderText || text,
-          data: {
-            cliente_nombre: user?.nombre || "",
-            telefono: user?.telefono || "",
-            gmail: user?.gmail || "",
-            direccion: user?.direccion || "",
-            payment_method: "efectivo"
-          }
-        });
-        // Mostrar botón de ubicación
-        addMsg("bot", "📍 Para confirmar tu pedido, necesito tu ubicación exacta.", true);
-      }
+if (data.is_order) {
+
+  const orderText =
+    data.order_details || text;
+
+  const missingFields = [];
+
+  if (!user?.nombre)
+    missingFields.push("cliente_nombre");
+
+  if (!user?.telefono)
+    missingFields.push("telefono");
+
+  if (!user?.gmail)
+    missingFields.push("gmail");
+
+  if (!user?.direccion)
+    missingFields.push("direccion");
+
+  setPendingOrderData({
+    pedido: orderText,
+    data: {
+      cliente_nombre: user?.nombre || "",
+      telefono: user?.telefono || "",
+      gmail: user?.gmail || "",
+      direccion: user?.direccion || "",
+      payment_method: "efectivo",
+    },
+  });
+
+  if (missingFields.length > 0) {
+
+    setOrderForm({
+      pedido: orderText,
+      step: 0,
+      data: {
+        cliente_nombre: user?.nombre || "",
+        telefono: user?.telefono || "",
+        gmail: user?.gmail || "",
+        direccion: user?.direccion || "",
+      },
+    });
+
+    addMsg(
+      "bot",
+      "🛵 Necesito algunos datos para completar tu pedido."
+    );
+
+  } else {
+
+    addMsg(
+      "bot",
+      "📍 Comparte tu ubicación para confirmar el pedido.",
+      true
+    );
+
+  }
+}
       
     } catch (err) {
       addMsg("bot", `❌ ${err.message}`);
@@ -167,11 +203,12 @@ export default function ChatScreen({ user, onLogout }) {
       console.log("📍 Ubicación:", location);
       
       // Usar la función placeOrder del API
-      const result = await placeOrder(
-        orderData.pedido,
-        orderData.data,
-        location
-      );
+const result = await placeOrder(
+  user.id,
+  orderData.pedido,
+  orderData.data,
+  location
+);
       
       console.log("📬 Respuesta del servidor:", result);
       
@@ -227,30 +264,31 @@ export default function ChatScreen({ user, onLogout }) {
             {messages.map((msg) => (
               <div key={msg.id}>
                 <MessageBubble msg={msg} />
-                {msg.requiresLocation && !showLocationPicker && !loading && (
-                  <div style={{ marginTop: 8, marginLeft: 50 }}>
-                    <button
-                      onClick={() => setShowLocationPicker(true)}
-                      disabled={isSubmittingOrder}
-                      style={{
-                        backgroundColor: "#10b981",
-                        color: "white",
-                        padding: "8px 16px",
-                        borderRadius: 8,
-                        border: "none",
-                        cursor: isSubmittingOrder ? "not-allowed" : "pointer",
-                        fontSize: 14,
-                        fontWeight: "bold",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 8,
-                        opacity: isSubmittingOrder ? 0.5 : 1
-                      }}
-                    >
-                      📍 Compartir mi ubicación
-                    </button>
-                  </div>
-                )}
+{/* ✅ Solo mostrar botón si aún hay un pedido pendiente de ubicación */}
+{msg.requiresLocation && !showLocationPicker && !loading && pendingOrderData && (
+  <div style={{ marginTop: 8, marginLeft: 50 }}>
+    <button
+      onClick={() => setShowLocationPicker(true)}
+      disabled={isSubmittingOrder}
+      style={{
+        backgroundColor: "#10b981",
+        color: "white",
+        padding: "8px 16px",
+        borderRadius: 8,
+        border: "none",
+        cursor: isSubmittingOrder ? "not-allowed" : "pointer",
+        fontSize: 14,
+        fontWeight: "bold",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        opacity: isSubmittingOrder ? 0.5 : 1
+      }}
+    >
+      📍 Compartir mi ubicación
+    </button>
+  </div>
+)}
               </div>
             ))}
 
