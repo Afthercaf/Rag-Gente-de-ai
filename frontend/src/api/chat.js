@@ -20,6 +20,26 @@ export async function sendChat(message, userId) {
  * @param {object} ubicacion - { lat, lng, direccion_completa, ... } (opcional)
  * @returns {{ success, order_id, message }}
  */
+function extractTotalFromText(text) {
+  if (!text || typeof text !== "string") return null;
+  const normalized = text.replace(/,/g, ".");
+
+  // Buscar un total explícito o un precio marcado.
+  const explicitTotal = normalized.match(/\b(?:total|importe|precio total|monto|subtotal)\b\s*[:=]?\s*(?:\$|USD|MXN)?\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+  if (explicitTotal) return explicitTotal[1];
+
+  const explicitPrice = normalized.match(/\b(?:precio|costo|coste|valor)\b\s*[:=]?\s*(?:\$|USD|MXN)?\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+  if (explicitPrice) return explicitPrice[1];
+
+  // Si el texto contiene un valor monetario con símbolo, use el último valor encontrado.
+  const currencyValues = Array.from(normalized.matchAll(/(?:\$|USD|MXN)\s*([0-9]+(?:\.[0-9]{1,2})?)/gi), (m) => m[1]);
+  if (currencyValues.length > 0) {
+    return currencyValues[currencyValues.length - 1];
+  }
+
+  return null;
+}
+
 export async function placeOrder(user_id, pedido, form, ubicacion = null) {
   // Validaciones básicas
   if (!pedido || typeof pedido !== 'string') {
@@ -30,6 +50,7 @@ export async function placeOrder(user_id, pedido, form, ubicacion = null) {
     throw new Error("Los datos del cliente son requeridos");
   }
   
+  const extractedTotal = extractTotalFromText(pedido);
   const payload = {
     user_id,
     pedido: pedido.trim(),
@@ -37,6 +58,7 @@ export async function placeOrder(user_id, pedido, form, ubicacion = null) {
     telefono: form.telefono || "",
     gmail: form.gmail || "",
     direccion: form.direccion || "",
+    total: form.total || extractedTotal || null,
     payment_method: form.payment_method || "efectivo",
   };
   

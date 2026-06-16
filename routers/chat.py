@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -12,8 +14,24 @@ from services.session_service import (
     build_history_text,
     get_user_session,
 )
-from services.history_service import load_history, clear_history
+from src.supabase_chat import delete_chat_history, get_chat_history
 from utils.cache_keys import get_cache_key
+
+
+# ✅ Ahora recibe pizza_names dinámico desde RAG
+def is_new_order_query(query: str, pizza_names: list[str]) -> bool:
+    text = query.lower()
+
+    has_order_intent = bool(
+        re.search(r"\b(quiero|dame|ordenar|pedir|trae|me das)\b", text)
+    )
+
+    has_pizza_reference = "pizza" in text or any(
+        name in text for name in pizza_names
+    )
+
+    return has_order_intent and has_pizza_reference
+
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -44,8 +62,14 @@ async def chat(req: ChatRequest):
             return JSONResponse(content=cached)
 
     try:
-        history_text = build_history_text(session)
-        search_query = build_enriched_query(session, query)
+        # ✅ Nombres dinámicos desde RAG (con caché interno)
+        pizza_names = rag_service.get_pizza_names()
+        is_new_order = is_new_order_query(query, pizza_names)
+        print(f"🍕 Pizzas detectadas del RAG: {pizza_names}")
+        print(f"🆕 Es nuevo pedido: {is_new_order}")
+
+        history_text = "" if is_new_order else build_history_text(session)
+        search_query = query if is_new_order else build_enriched_query(session, query)
         print(f"🔍 Búsqueda RAG: {search_query}")
 
         rag_context = await rag_service.retrieve_context(search_query)
@@ -54,11 +78,13 @@ async def chat(req: ChatRequest):
 
         content = await llm_service.generate_response(
             context=full_context,
-            history=history_text,
+            history_text=history_text,
             question=query,
+            history=session["history"],
         )
 
-        append_to_history(session, req.user_id, query, content)
+        if req.save_history:
+            append_to_history(session, req.user_id, query, content)
 
         is_order, order_details = llm_service.extract_order_details(content)
 
@@ -119,25 +145,22 @@ async def quick_reply(req: QuickReplyRequest):
 
 
 @router.get("/history/{user_id}")
-async def get_history(user_id: int):
-    """Obtiene el historial de conversación del usuario."""
-    history = load_history(user_id)
-    return JSONResponse(content={
+async def history(user_id: int, limit: int = 50):
+    """Obtiene el historial de conversación del usuario desde Supabase."""
+    messages = get_chat_history(user_id, limit=limit)
+    return JSONResponse({
         "user_id": user_id,
-        "messages_count": len(history),
-        "history": history,
+        "messages_count": len(messages),
+        "history": messages,
     })
 
 
 @router.delete("/history/{user_id}")
 async def delete_history(user_id: int):
-    """Elimina el historial de conversación del usuario."""
-    clear_history(user_id)
-    # También limpiar de la sesión en memoria
-    if user_id in __import__('services.session_service', fromlist=['USER_SESSIONS']).USER_SESSIONS:
-        del __import__('services.session_service', fromlist=['USER_SESSIONS']).USER_SESSIONS[user_id]
-    
-    return JSONResponse(content={
-        "status": "ok",
-        "message": f"✅ Historial del usuario {user_id} eliminado",
+    """Elimina el historial de conversación del usuario en Supabase."""
+    success = delete_chat_history(user_id)
+    return JSONResponse({
+        "status": "ok" if success else "error",
+        "user_id": user_id,
+        "deleted": success,
     })

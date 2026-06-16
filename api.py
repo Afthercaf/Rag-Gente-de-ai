@@ -367,6 +367,7 @@ class OrderRequest(BaseModel):
     gmail: str
     direccion: str
     payment_method: str
+    total: Optional[str] = None
     ubicacion: Optional[dict] = None
 
 class StatusUpdateRequest(BaseModel):
@@ -756,7 +757,7 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
         "gmail": req.gmail,
         "direccion": req.direccion,
         "pedido": req.pedido,
-        "total": "pendiente",
+        "total": req.total or "pendiente",
         "payment_method": req.payment_method,
         "estado": "pendiente",
         "ubicacion_maps": ubicacion_json,
@@ -777,10 +778,11 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
         direccion=req.direccion,
         pedido=req.pedido,
         payment_method=req.payment_method,
+        total=req.total,
         ubicacion=req.ubicacion,
     )
     
-    return {"success": True, "order_id": order_id}
+    return {"success": True, "order_id": order_id, "total": req.total or "pendiente"}
 
 @app.patch("/order/{order_id}/status")
 async def patch_order_status(order_id: str, req: StatusUpdateRequest):

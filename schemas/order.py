@@ -10,6 +10,7 @@ class OrderRequest(BaseModel):
     gmail: str
     direccion: str
     payment_method: str
+    total: Optional[str] = None
     ubicacion: Optional[dict] = None
 
 

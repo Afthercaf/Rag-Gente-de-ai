@@ -1,34 +1,75 @@
-from typing import Any, Dict
-from services.history_service import load_history, append_message, clear_history
+from typing import Any, Dict, List
 
-# Memoria de conversación por usuario (en sesión)
+from src.supabase_chat import delete_chat_history, get_chat_history, insert_chat_history
+
+# Memoria de conversación por usuario
 USER_SESSIONS: Dict[int, Dict[str, Any]] = {}
 
 
+def _normalize_history_records(records: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Convierte registros de Supabase en pares {user, assistant}."""
+    history: List[Dict[str, str]] = []
+    current: Dict[str, str] = {}
+
+    for msg in records:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+
+        if role == "user":
+            if current:
+                if "assistant" not in current:
+                    current["assistant"] = ""
+                history.append(current)
+                current = {}
+            current["user"] = content
+        elif role == "assistant":
+            if not current:
+                current = {"user": ""}
+            current["assistant"] = content
+            history.append(current)
+            current = {}
+
+    if current:
+        if "assistant" not in current:
+            current["assistant"] = ""
+        history.append(current)
+
+    return history
+
+
 def get_user_session(user_id: int) -> Dict[str, Any]:
-    """Retorna (o crea) la sesión de conversación de un usuario, cargando historial persistido."""
+    """Retorna (o crea) la sesión de conversación de un usuario."""
     if user_id not in USER_SESSIONS:
-        # Cargar historial persistido desde disco
-        persistent_history = load_history(user_id)
-        USER_SESSIONS[user_id] = {"history": persistent_history}
+        if user_id > 0:
+            raw_history = get_chat_history(user_id, limit=20)
+            history = _normalize_history_records(raw_history)
+        else:
+            history = []
+        USER_SESSIONS[user_id] = {"history": history}
     return USER_SESSIONS[user_id]
 
 
 def append_to_history(session: Dict[str, Any], user_id: int, user_msg: str, assistant_msg: str) -> None:
-    """Agrega un intercambio al historial y lo persiste a disco."""
-    session["history"].append({"user": user_msg, "assistant": assistant_msg})
+    """Agrega un intercambio al historial, lo limita a los últimos 20 mensajes y lo persiste."""
+    exchange = {"user": user_msg, "assistant": assistant_msg}
+    session["history"].append(exchange)
     session["history"] = session["history"][-20:]
-    
-    # Guardar en disco
-    append_message(user_id, user_msg, assistant_msg, limit=20)
+
+    if user_id > 0:
+        insert_chat_history(user_id, "user", user_msg)
 
 
 def build_history_text(session: Dict[str, Any], last_n: int = 10) -> str:
     """Formatea los últimos N intercambios para el prompt."""
-    return "\n".join(
-        f"Cliente: {msg['user']}\nAsistente: {msg['assistant']}"
-        for msg in session["history"][-last_n:]
-    )
+    lines = []
+    for msg in session["history"][-last_n:]:
+        user_text = msg.get("user", "")
+        assistant_text = msg.get("assistant", "")
+        if user_text:
+            lines.append(f"Cliente: {user_text}")
+        if assistant_text:
+            lines.append(f"Asistente: {assistant_text}")
+    return "\n".join(lines)
 
 
 def build_enriched_query(session: Dict[str, Any], query: str, last_n: int = 3) -> str:

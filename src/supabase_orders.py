@@ -5,6 +5,9 @@ import requests
 import logging
 import json
 from typing import Optional
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from requests.exceptions import RequestException
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,6 +25,17 @@ HEADERS = {
     "Prefer":        "return=representation",
 }
 
+RETRY_STRATEGY = Retry(
+    total=3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PATCH"],
+    backoff_factor=1,
+)
+
+SESSION = requests.Session()
+SESSION.mount("https://", HTTPAdapter(max_retries=RETRY_STRATEGY))
+SESSION.mount("http://", HTTPAdapter(max_retries=RETRY_STRATEGY))
+
 
 def create_order(data: dict) -> str | None:
     """Crea una nueva orden en Supabase y retorna su ID."""
@@ -30,10 +44,11 @@ def create_order(data: dict) -> str | None:
         if "ubicacion_maps" in data and isinstance(data["ubicacion_maps"], dict):
             data["ubicacion_maps"] = json.dumps(data["ubicacion_maps"])
         
-        response = requests.post(
+        response = SESSION.post(
             f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
             json=data,
+            timeout=30,
         )
         if response.status_code in [200, 201]:
             result = response.json()
@@ -54,10 +69,11 @@ def update_order_status(order_id: str, status: str) -> bool:
         print(f"\n🔄 Actualizando pedido {order_id}")
         print(f"📌 Nuevo estado: {status}")
 
-        response = requests.patch(
+        response = SESSION.patch(
             f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
             headers=HEADERS,
             json={"estado": status},
+            timeout=30,
         )
 
         print("STATUS:", response.status_code)
@@ -96,9 +112,10 @@ def get_order_status(order_id: str) -> str:
     al cliente las actualizaciones en tiempo casi-real.
     """
     try:
-        response = requests.get(
+        response = SESSION.get(
             f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}&select=estado",
             headers=HEADERS,
+            timeout=30,
         )
         if response.status_code == 200:
             data = response.json()
@@ -116,9 +133,10 @@ def get_order_status(order_id: str) -> str:
 def get_order_by_id(order_id: str) -> Optional[dict]:
     """Obtiene una orden completa por ID."""
     try:
-        response = requests.get(
+        response = SESSION.get(
             f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
             headers=HEADERS,
+            timeout=30,
         )
         if response.status_code == 200:
             data = response.json()

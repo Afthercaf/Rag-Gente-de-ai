@@ -25,6 +25,7 @@ def send_telegram_order(
     direccion: str,
     pedido: str,
     payment_method: str,
+    total: Optional[str] = None,
     ubicacion: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
@@ -46,6 +47,7 @@ def send_telegram_order(
         f"📧 <b>Email:</b> {safe(gmail)}\n"
         f"📍 <b>Dirección:</b> {safe(direccion)}\n"
         f"🍕 <b>Pedido:</b> {safe(pedido)}\n"
+        f"💰 <b>Total:</b> {safe(total or 'pendiente')}\n"
         f"💳 <b>Pago:</b> {safe(payment_method)}\n"
     )
 

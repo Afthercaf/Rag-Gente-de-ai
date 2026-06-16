@@ -28,6 +28,14 @@ export default function ChatScreen({ user, onLogout }) {
   const lastReportedStatus = useRef(null);
   const bottomRef = useRef(null);
 
+  const addMsg = (role, text, requiresAction = false) => {
+    const newMsg = { id: nextId(), role, text };
+    if (requiresAction && role === "bot") {
+      newMsg.requiresLocation = true;
+    }
+    setMessages((m) => [...m, newMsg]);
+  };
+
   const { status: orderStatus, label: orderLabel, isDone } = useOrderStatus(activeOrderId);
 
 // ✅ CORRECTO — notifica cualquier cambio de estado
@@ -39,11 +47,16 @@ export default function ChatScreen({ user, onLogout }) {
 
   // No notificar el estado inicial "pendiente" — ya se mencionó al confirmar el pedido
     if (orderStatus !== "pendiente") {
-    addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
+      addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
     }
 
-    if (isDone) setActiveOrderId(null);
-    }, [orderStatus, activeOrderId, isDone, orderLabel]);
+  }, [orderStatus, activeOrderId, orderLabel]);
+
+  useEffect(() => {
+    if (isDone) {
+      setActiveOrderId(null);
+    }
+  }, [isDone]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -57,14 +70,6 @@ export default function ChatScreen({ user, onLogout }) {
         direccion: user?.direccion,
       })
     : [];
-
-  const addMsg = (role, text, requiresAction = false) => {
-    const newMsg = { id: nextId(), role, text };
-    if (requiresAction && role === "bot") {
-      newMsg.requiresLocation = true;
-    }
-    setMessages((m) => [...m, newMsg]);
-  };
 
   const sendMessage = async (text) => {
     if (!text.trim()) return;
@@ -85,7 +90,8 @@ const data = await sendChat(
 if (data.is_order) {
 
   const orderText =
-    data.order_details || text;
+    data.order_details?.raw || text;
+  const orderTotal = data.order_details?.total || null;
 
   const missingFields = [];
 
@@ -108,6 +114,7 @@ if (data.is_order) {
       telefono: user?.telefono || "",
       gmail: user?.gmail || "",
       direccion: user?.direccion || "",
+      total: orderTotal,
       payment_method: "efectivo",
     },
   });
@@ -122,6 +129,7 @@ if (data.is_order) {
         telefono: user?.telefono || "",
         gmail: user?.gmail || "",
         direccion: user?.direccion || "",
+        total: orderTotal,
       },
     });
 
@@ -148,9 +156,11 @@ if (data.is_order) {
     }
   };
 
-  const extractOrderFromReply = (reply) => {
-    const match = reply.match(/📝\s*\*\*PEDIDO:\*\*\s*(.+?)(?:\n|$)/);
-    return match ? match[1] : reply;
+  const normalizeOrderText = (pedido) => {
+    if (typeof pedido === "string") return pedido.trim();
+    if (pedido && typeof pedido.raw === "string") return pedido.raw.trim();
+    if (pedido) return JSON.stringify(pedido).trim();
+    return "";
   };
 
   const submitOrderStep = async (value) => {
@@ -165,7 +175,7 @@ if (data.is_order) {
     } else {
       // Guardar datos y abrir location picker
       setPendingOrderData({
-        pedido: orderForm.pedido,
+        pedido: normalizeOrderText(orderForm.pedido),
         data: {
           ...newData,
           payment_method: "efectivo"
@@ -198,14 +208,15 @@ if (data.is_order) {
     
     try {
       const orderData = pendingOrderData;
-      console.log("📦 Enviando pedido:", orderData.pedido);
+      const pedidoText = normalizeOrderText(orderData.pedido);
+      console.log("📦 Enviando pedido:", pedidoText);
       console.log("👤 Datos cliente:", orderData.data);
       console.log("📍 Ubicación:", location);
       
       // Usar la función placeOrder del API
 const result = await placeOrder(
   user.id,
-  orderData.pedido,
+  pedidoText,
   orderData.data,
   location
 );
@@ -213,7 +224,10 @@ const result = await placeOrder(
       console.log("📬 Respuesta del servidor:", result);
       
       if (result.success) {
-        addMsg("bot", `✅ ¡Pedido #${result.order_id} confirmado!\n📍 Ubicación recibida.\n🍕 Te avisaré cuando el estado cambie.`);
+        addMsg(
+          "bot",
+          `✅ ¡Pedido #${result.order_id} confirmado!${result.total ? `\n💰 Total: ${result.total}` : ""}\n📍 Ubicación recibida.\n🍕 Te avisaré cuando el estado cambie.`
+        );
         
         lastReportedStatus.current = "pendiente";
         setActiveOrderId(String(result.order_id));

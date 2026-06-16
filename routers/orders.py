@@ -22,6 +22,7 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
         direccion=req.direccion,
         pedido=req.pedido,
         payment_method=req.payment_method,
+        total=req.total,
         ubicacion=req.ubicacion,
     )
 
@@ -35,6 +36,7 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
             direccion=req.direccion,
             pedido=req.pedido,
             payment_method=req.payment_method,
+            total=req.total,
             ubicacion=req.ubicacion,
         )
 

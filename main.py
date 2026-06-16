@@ -128,6 +128,7 @@ def ask_order_data():
     gmail = input("📧 Gmail: ").strip()
     direccion = input("📍 Dirección completa: ").strip()
     payment_method = input("💳 Pago (efectivo/tarjeta): ").strip()
+    total = input("💰 Total del pedido (ej. 150.00, 150 pesos, dejar vacío si no aplica): ").strip()
     
     while payment_method.lower() not in ["efectivo", "tarjeta"]:
         print("❌ Método inválido. Use 'efectivo' o 'tarjeta'")
@@ -138,7 +139,8 @@ def ask_order_data():
         "telefono": telefono,
         "gmail": gmail,
         "direccion": direccion,
-        "payment_method": payment_method
+        "payment_method": payment_method,
+        "total": total or None
     }
 
 def format_promotions(promo_documents):
@@ -206,7 +208,7 @@ while True:
             "gmail": order_data["gmail"],
             "direccion": order_data["direccion"],
             "pedido": query,
-            "total": "pendiente",
+            "total": order_data.get("total") or "pendiente",
             "payment_method": order_data["payment_method"],
             "estado": "pendiente"
         }
@@ -224,7 +226,8 @@ while True:
                 gmail=order_data["gmail"],
                 direccion=order_data["direccion"],
                 pedido=query,
-                payment_method=order_data["payment_method"]
+                payment_method=order_data["payment_method"],
+                total=order_data.get("total") or "pendiente"
             )
             
             print("\n" + "="*40)
@@ -232,6 +235,8 @@ while True:
             print("="*40)
             print(f"✅ Pedido registrado correctamente")
             print(f"🆔 ID DEL PEDIDO: {order_id}")
+            if order_data.get("total"):
+                print(f"💰 Total: {order_data['total']}")
             print(f"📦 Estado: PENDIENTE")
             print(f"🍕 Esperando confirmación en Telegram...")
             print("="*40 + "\n")

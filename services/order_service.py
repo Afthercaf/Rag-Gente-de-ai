@@ -15,9 +15,23 @@ async def place_order(
     direccion: str,
     pedido: str,
     payment_method: str,
+    total: Optional[str],
     ubicacion: Optional[dict],
 ) -> Dict[str, Any]:
     ubicacion_json = json.dumps(ubicacion) if ubicacion else None
+
+    # Sanitizar total: preferir número. Si no se puede, dejar 'pendiente' para evitar errores en Supabase.
+    sanitized_total: Any = None
+    if total:
+        import re
+
+        m = re.search(r"([0-9]+(?:[.,][0-9]{1,2})?)", str(total))
+        if m:
+            # Normalizar coma a punto
+            try:
+                sanitized_total = float(m.group(1).replace(",", "."))
+            except Exception:
+                sanitized_total = None
 
     payload = {
         "user_id": user_id,
@@ -26,7 +40,7 @@ async def place_order(
         "gmail": gmail,
         "direccion": direccion,
         "pedido": pedido,
-        "total": "pendiente",
+        "total": sanitized_total if sanitized_total is not None else "pendiente",
         "payment_method": payment_method,
         "estado": "pendiente",
         "ubicacion_maps": ubicacion_json,
@@ -38,7 +52,7 @@ async def place_order(
     if not order_id:
         return {"success": False, "message": "Error al crear el pedido"}
 
-    return {"success": True, "order_id": order_id}
+    return {"success": True, "order_id": order_id, "total": payload["total"]}
 
 
 async def notify_telegram(
@@ -49,6 +63,7 @@ async def notify_telegram(
     direccion: str,
     pedido: str,
     payment_method: str,
+    total: Optional[str],
     ubicacion: Optional[dict],
 ) -> None:
     """Envía notificación por Telegram (pensada para ejecutarse como background task)."""
@@ -61,6 +76,7 @@ async def notify_telegram(
         direccion=direccion,
         pedido=pedido,
         payment_method=payment_method,
+        total=total,
         ubicacion=ubicacion,
     )
 
