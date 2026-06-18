@@ -1,10 +1,13 @@
 // ── Colores ──────────────────────────────────────────────────────────────────
 export const RED    = "#e8372a";
-export const DARK   = "#111111";
-export const CARD   = "#1a1a1a";
-export const BORDER = "#2c2c2c";
+export const DARK   = "#0e0e0e";
+export const CARD   = "#161616";
+export const CARD2  = "#1c1c1c";
+export const BORDER = "#252525";
+export const BORDER2= "#2e2e2e";
 export const TEXT   = "#f0ede8";
-export const MUTED  = "#888";
+export const MUTED  = "#777";
+export const GREEN  = "#4caf50";
 
 // ── Estilos globales (inyectados una sola vez) ────────────────────────────────
 if (typeof document !== "undefined") {
@@ -18,10 +21,34 @@ if (typeof document !== "undefined") {
         40%          { transform:translateY(-6px) }
       }
       @keyframes fadeIn {
-        from { opacity:0; transform:translateY(6px) }
+        from { opacity:0; transform:translateY(8px) }
         to   { opacity:1; transform:translateY(0)   }
       }
-      textarea { scrollbar-width:thin; scrollbar-color:#2c2c2c transparent }
+      @keyframes pulse {
+        0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,.45) }
+        60%     { box-shadow:0 0 0 12px rgba(239,68,68,0) }
+      }
+      @keyframes voicePulse {
+        0%,100% { transform:scale(1);   opacity:1   }
+        50%     { transform:scale(1.55);opacity:.45 }
+      }
+      @keyframes slideUp {
+        from { opacity:0; transform:translateX(-50%) translateY(16px) }
+        to   { opacity:1; transform:translateX(-50%) translateY(0)    }
+      }
+      @keyframes ripple {
+        0%   { transform:scale(.8); opacity:1 }
+        100% { transform:scale(2.2);opacity:0 }
+      }
+      @keyframes micGlow {
+        0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,.6),0 4px 16px rgba(0,0,0,.5) }
+        50%     { box-shadow:0 0 0 8px rgba(239,68,68,.1),0 4px 20px rgba(0,0,0,.6) }
+      }
+      @keyframes waveBar {
+        0%,100% { height:4px }
+        50%     { height:16px }
+      }
+      textarea { scrollbar-width:thin; scrollbar-color:#252525 transparent }
       * { box-sizing:border-box; margin:0; padding:0 }
       body { margin:0 }
     `;
@@ -40,8 +67,8 @@ export const s = {
   },
   bgPattern: {
     position:"absolute", inset:0, zIndex:0, pointerEvents:"none",
-    backgroundImage:`radial-gradient(circle at 20% 50%,rgba(232,55,42,.07) 0%,transparent 60%),
-                     radial-gradient(circle at 80% 20%,rgba(232,55,42,.05) 0%,transparent 50%)`,
+    backgroundImage:`radial-gradient(ellipse 60% 40% at 15% 55%,rgba(232,55,42,.08) 0%,transparent 65%),
+                     radial-gradient(ellipse 50% 35% at 85% 15%,rgba(232,55,42,.04) 0%,transparent 55%)`,
   },
 
   // auth
@@ -53,7 +80,7 @@ export const s = {
   authLogo: { display:"flex", flexDirection:"column", alignItems:"center", gap:6, marginBottom:24 },
   authCard: {
     width:"100%", background:CARD,
-    border:`1px solid ${BORDER}`, borderRadius:18,
+    border:`1px solid ${BORDER2}`, borderRadius:18,
     padding:"28px 28px 24px",
   },
   authTitle: { fontSize:20, fontWeight:"bold", color:TEXT, marginBottom:20, textAlign:"center" },
@@ -61,13 +88,14 @@ export const s = {
   fieldLabel:{ display:"block", fontSize:13, color:MUTED, marginBottom:5, fontFamily:"monospace" },
   authInput: {
     width:"100%", boxSizing:"border-box",
-    background:"#111", border:`1px solid ${BORDER}`,
+    background:"#111", border:`1px solid ${BORDER2}`,
     borderRadius:8, color:TEXT, padding:"10px 14px",
     fontSize:15, fontFamily:"'Georgia',serif", outline:"none",
+    transition:"border-color .2s",
   },
   select: {
     width:"100%", boxSizing:"border-box",
-    background:"#111", border:`1px solid ${BORDER}`,
+    background:"#111", border:`1px solid ${BORDER2}`,
     borderRadius:8, color:TEXT, padding:"10px 14px",
     fontSize:15, fontFamily:"'Georgia',serif", outline:"none",
   },
@@ -77,11 +105,12 @@ export const s = {
     color:"#fff", padding:"12px",
     fontSize:16, fontWeight:"bold",
     cursor:"pointer", fontFamily:"'Georgia',serif",
-    transition:"opacity .15s",
+    transition:"opacity .15s, background .15s",
+    boxShadow:"0 2px 14px rgba(232,55,42,.3)",
   },
   authLink: { color:RED, cursor:"pointer", textDecoration:"underline" },
   errorMsg: {
-    background:"#2a1010", border:`1px solid ${RED}55`,
+    background:"#1e0a0a", border:`1px solid ${RED}44`,
     borderRadius:8, color:"#f87171",
     padding:"10px 14px", fontSize:13,
     marginBottom:12, fontFamily:"monospace",
@@ -97,56 +126,134 @@ export const s = {
   header: {
     padding:"14px 20px", borderBottom:`1px solid ${BORDER}`,
     display:"flex", alignItems:"center", justifyContent:"space-between",
-    background:"#141414", flexShrink:0,
+    background:"#111", flexShrink:0,
   },
   logoWrap:   { display:"flex", alignItems:"center", gap:12 },
-  logoEmoji:  { fontSize:30, lineHeight:1 },
+  logoEmoji:  { fontSize:28, lineHeight:1, filter:"drop-shadow(0 1px 6px rgba(232,55,42,.35))" },
   logoName:   { fontSize:17, fontWeight:"bold", color:TEXT, letterSpacing:".02em" },
-  logoSub:    { fontSize:11, color:"#4caf50", marginTop:2, fontFamily:"monospace" },
-  dot:        { width:10, height:10, borderRadius:"50%", background:"#4caf50", boxShadow:"0 0 8px #4caf50" },
-  userBadge:  { display:"flex", alignItems:"center", gap:7, background:"#222", borderRadius:20, padding:"4px 10px 4px 5px", border:`1px solid ${BORDER}` },
-  userInitial:{ width:24, height:24, borderRadius:"50%", background:RED, color:"#fff", fontSize:12, fontWeight:"bold", display:"flex", alignItems:"center", justifyContent:"center" },
+  logoSub:    { fontSize:11, color:GREEN, marginTop:2, fontFamily:"monospace", display:"flex", alignItems:"center", gap:5 },
+  logoSubDot: { display:"inline-block", width:6, height:6, borderRadius:"50%", background:GREEN, boxShadow:`0 0 6px ${GREEN}` },
+  dot:        { width:9, height:9, borderRadius:"50%", background:GREEN, boxShadow:`0 0 8px ${GREEN}` },
+  userBadge:  { display:"flex", alignItems:"center", gap:7, background:"#1a1a1a", borderRadius:20, padding:"4px 12px 4px 5px", border:`1px solid ${BORDER2}` },
+  userInitial:{ width:26, height:26, borderRadius:"50%", background:RED, color:"#fff", fontSize:12, fontWeight:"bold", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 0 8px rgba(232,55,42,.35)" },
   userName:   { fontSize:13, color:TEXT },
   userRole:   { fontSize:11, color:MUTED, fontFamily:"monospace" },
-  logoutBtn:  { background:"transparent", border:`1px solid ${BORDER}`, borderRadius:8, color:MUTED, width:32, height:32, cursor:"pointer", fontSize:16 },
+  logoutBtn:  { background:"transparent", border:`1px solid ${BORDER2}`, borderRadius:8, color:MUTED, width:30, height:30, cursor:"pointer", fontSize:15, transition:"all .2s", display:"flex", alignItems:"center", justifyContent:"center" },
 
   // feed
   feed: {
     flex:1, overflowY:"auto", padding:"24px 20px",
-    display:"flex", flexDirection:"column", gap:16,
+    display:"flex", flexDirection:"column", gap:14,
     scrollbarWidth:"thin", scrollbarColor:`${BORDER} transparent`,
   },
-  msgRow:     { display:"flex", alignItems:"flex-end", gap:10 },
-  avatar:     { fontSize:22, flexShrink:0, marginBottom:2 },
-  bubbleBot:  { background:"#242424", border:`1px solid ${BORDER}`, color:TEXT, padding:"12px 16px", borderRadius:"16px 16px 16px 4px", maxWidth:"75%", fontSize:15, lineHeight:1.6 },
-  bubbleUser: { background:RED, color:"#fff", padding:"12px 16px", borderRadius:"16px 16px 4px 16px", maxWidth:"75%", fontSize:15, lineHeight:1.6 },
-  typingBubble:{ display:"flex", alignItems:"center", gap:5, padding:"14px 18px" },
+  msgRow:     { display:"flex", alignItems:"flex-end", gap:10, animation:"fadeIn .25s ease" },
+  avatar:     { fontSize:21, flexShrink:0, marginBottom:2 },
+  bubbleBot:  { background:CARD2, border:`1px solid ${BORDER2}`, color:TEXT, padding:"11px 15px", borderRadius:"16px 16px 16px 4px", maxWidth:"76%", fontSize:14, lineHeight:1.65 },
+  bubbleUser: { background:`linear-gradient(135deg,#d42d21,${RED})`, color:"#fff", padding:"11px 15px", borderRadius:"16px 16px 4px 16px", maxWidth:"76%", fontSize:14, lineHeight:1.65, boxShadow:"0 2px 12px rgba(232,55,42,.22)" },
+  typingBubble:{ display:"flex", alignItems:"center", gap:5, padding:"13px 16px" },
   dot2:       { display:"inline-block", width:7, height:7, borderRadius:"50%", background:MUTED, animation:"bounce 0.9s infinite ease-in-out" },
 
   // order
-  orderCard:  { background:"#1e1e1e", border:`1px solid ${RED}44`, borderRadius:14, padding:"18px 20px", marginLeft:36, animation:"fadeIn .3s ease" },
+  orderCard:  { background:"#1a1a1a", border:`1px solid ${RED}33`, borderRadius:14, padding:"18px 20px", marginLeft:36, animation:"fadeIn .3s ease" },
   orderLabel: { fontSize:14, color:"#f5a623", marginBottom:12, fontFamily:"monospace", letterSpacing:".05em" },
   orderInputRow:{ display:"flex", gap:8 },
-  orderInput: { flex:1, background:"#111", border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, padding:"10px 14px", fontSize:15, outline:"none" },
+  orderInput: { flex:1, background:"#111", border:`1px solid ${BORDER2}`, borderRadius:8, color:TEXT, padding:"10px 14px", fontSize:15, outline:"none" },
   orderSubmit:{ background:RED, border:"none", borderRadius:8, color:"#fff", width:44, fontSize:20, cursor:"pointer" },
   selectRow:  { display:"flex", gap:12 },
-  optBtn:     { flex:1, padding:"12px", border:`1px solid ${BORDER}`, borderRadius:10, background:"transparent", color:TEXT, fontSize:15, cursor:"pointer" },
+  optBtn:     { flex:1, padding:"12px", border:`1px solid ${BORDER2}`, borderRadius:10, background:"transparent", color:TEXT, fontSize:15, cursor:"pointer" },
   optBtnActive:{ background:RED, border:`1px solid ${RED}`, color:"#fff" },
 
   // input bar
-  inputBar:   { padding:"14px 16px", borderTop:`1px solid ${BORDER}`, display:"flex", gap:10, alignItems:"flex-end", background:"#141414", flexShrink:0 },
-  textarea:   { flex:1, background:"#1e1e1e", border:`1px solid ${BORDER}`, borderRadius:12, color:TEXT, padding:"12px 16px", fontSize:15, resize:"none", outline:"none", lineHeight:1.5, maxHeight:120, overflow:"auto" },
-  sendBtn:    { background:RED, border:"none", borderRadius:12, color:"#fff", width:46, height:46, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0, transition:"opacity .15s" },
+  inputBar:   { padding:"12px 16px", borderTop:`1px solid ${BORDER}`, display:"flex", gap:9, alignItems:"flex-end", background:"#111", flexShrink:0 },
+  textarea:   {
+    flex:1, background:CARD2, border:`1px solid ${BORDER2}`, borderRadius:12,
+    color:TEXT, padding:"11px 15px", fontSize:14, resize:"none", outline:"none",
+    lineHeight:1.5, maxHeight:120, overflow:"auto",
+    fontFamily:"'Georgia',serif", transition:"border-color .2s, background .2s",
+  },
+  textareaListening: {
+    borderColor:"#ef4444", background:"#1e0a0a", color:"#fca5a5",
+  },
+  sendBtn:    {
+    background:RED, border:"none", borderRadius:12, color:"#fff",
+    width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center",
+    cursor:"pointer", flexShrink:0, transition:"all .15s",
+    boxShadow:"0 2px 10px rgba(232,55,42,.28)",
+  },
+
+  // ── Mic button ──────────────────────────────────────────────────────────────
+  // Estado idle
+  micBtn: {
+    position:"relative", width:44, height:44, borderRadius:12, flexShrink:0,
+    background:CARD2, border:`1px solid ${BORDER2}`,
+    color:MUTED, fontSize:18, cursor:"pointer",
+    display:"flex", alignItems:"center", justifyContent:"center",
+    transition:"all .2s", overflow:"hidden",
+  },
+  // Estado activo (listening) — fusionar sobre micBtn
+  micBtnActive: {
+    background:"#ef4444", borderColor:"#ef4444", color:"#fff",
+    animation:"micGlow 1.4s ease-in-out infinite",
+  },
+  // Ondas ripple (position:absolute, inset:0 dentro del botón)
+  micRipple: {
+    position:"absolute", inset:0, borderRadius:12,
+    border:"2px solid rgba(255,255,255,.5)",
+    animation:"ripple 1.2s ease-out infinite",
+    pointerEvents:"none",
+  },
+  micRipple2: {
+    position:"absolute", inset:0, borderRadius:12,
+    border:"2px solid rgba(255,255,255,.3)",
+    animation:"ripple 1.2s ease-out .4s infinite",
+    pointerEvents:"none",
+  },
+  // Barras de onda de audio (dentro del botón en modo activo)
+  micWave: { display:"flex", alignItems:"center", gap:2, height:20 },
+  micWaveBar: {
+    display:"inline-block", width:3, background:"#fff",
+    borderRadius:2, height:4,
+  },
+  // Cada barra con su delay (aplicar via style inline)
+  micWaveBar1: { animation:"waveBar .6s ease-in-out infinite" },
+  micWaveBar2: { animation:"waveBar .6s ease-in-out .1s infinite" },
+  micWaveBar3: { animation:"waveBar .6s ease-in-out .2s infinite" },
+  micWaveBar4: { animation:"waveBar .6s ease-in-out .15s infinite" },
+  micWaveBar5: { animation:"waveBar .6s ease-in-out .05s infinite" },
+
+  // ── Toast flotante de escucha ──────────────────────────────────────────────
+  listenToast: {
+    position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
+    background:"#161616", border:`1px solid ${BORDER2}`,
+    color:TEXT, padding:"10px 18px", borderRadius:28,
+    display:"flex", alignItems:"center", gap:12,
+    fontSize:13, animation:"slideUp .3s ease", zIndex:1000,
+    whiteSpace:"nowrap", boxShadow:"0 8px 28px rgba(0,0,0,.55)",
+  },
+  listenDot: {
+    width:10, height:10, background:"#ef4444", borderRadius:"50%",
+    flexShrink:0, animation:"voicePulse 1s infinite",
+  },
+  listenInterim: {
+    color:"#fbbf24", fontSize:12, maxWidth:160,
+    overflow:"hidden", textOverflow:"ellipsis",
+    borderLeft:`1px solid ${BORDER2}`, paddingLeft:10,
+  },
+  cancelBtn: {
+    background:"#222", border:`1px solid ${BORDER2}`, color:MUTED,
+    padding:"5px 12px", borderRadius:16, cursor:"pointer",
+    fontSize:12, transition:"all .2s",
+  },
 
   // location picker – overlay
   locOverlay: {
     position:"fixed", inset:0,
-    background:"rgba(0,0,0,.65)", backdropFilter:"blur(4px)",
+    background:"rgba(0,0,0,.72)", backdropFilter:"blur(4px)",
     display:"flex", alignItems:"center", justifyContent:"center",
     zIndex:50, padding:16,
   },
   locModal: {
-    background:CARD, border:`1px solid ${BORDER}`, borderRadius:18,
+    background:CARD, border:`1px solid ${BORDER2}`, borderRadius:18,
     width:"min(440px,100%)", maxHeight:"90vh",
     overflowY:"auto", display:"flex", flexDirection:"column",
     scrollbarWidth:"thin", scrollbarColor:`${BORDER} transparent`,
@@ -160,7 +267,7 @@ export const s = {
   },
   locTitle: { fontSize:18, fontWeight:"bold", color:TEXT, fontFamily:"'Georgia',serif" },
   locCloseBtn: {
-    background:"transparent", border:`1px solid ${BORDER}`,
+    background:"transparent", border:`1px solid ${BORDER2}`,
     borderRadius:8, color:MUTED, width:32, height:32,
     cursor:"pointer", fontSize:18, display:"flex",
     alignItems:"center", justifyContent:"center",
@@ -174,54 +281,50 @@ export const s = {
     width:"100%", background:RED, border:"none", borderRadius:10,
     color:"#fff", padding:"12px", fontSize:15, fontWeight:"bold",
     cursor:"pointer", fontFamily:"'Georgia',serif", transition:"opacity .15s",
+    boxShadow:"0 2px 12px rgba(232,55,42,.28)",
   },
   locConfirmBtn: {
-    width:"100%", background:"#1a3a1a", border:`1px solid #4caf5066`,
-    borderRadius:10, color:"#4caf50", padding:"12px",
+    width:"100%", background:"#0f1e0f", border:`1px solid #4caf5055`,
+    borderRadius:10, color:GREEN, padding:"12px",
     fontSize:15, fontWeight:"bold",
-    cursor:"pointer", fontFamily:"'Georgia',serif", transition:"opacity .15s",
-    marginTop:4,
+    cursor:"pointer", fontFamily:"'Georgia',serif", transition:"opacity .15s", marginTop:4,
   },
   locConfirmBtnDone: {
-    width:"100%", background:"#4caf5022", border:`1px solid #4caf5066`,
-    borderRadius:10, color:"#4caf50", padding:"12px",
+    width:"100%", background:"#4caf5015", border:`1px solid #4caf5055`,
+    borderRadius:10, color:GREEN, padding:"12px",
     fontSize:15, fontWeight:"bold",
-    cursor:"default", fontFamily:"'Georgia',serif", opacity:.7,
-    marginTop:4,
+    cursor:"default", fontFamily:"'Georgia',serif", opacity:.65, marginTop:4,
   },
 
   // location picker – search row
   locSearchRow: { position:"relative" },
   locSearchInput: {
     width:"100%", boxSizing:"border-box",
-    background:"#111", border:`1px solid ${BORDER}`,
+    background:"#111", border:`1px solid ${BORDER2}`,
     borderRadius:8, color:TEXT, padding:"10px 44px 10px 14px",
     fontSize:15, fontFamily:"'Georgia',serif", outline:"none",
   },
   locSearchBtn: {
     position:"absolute", right:10, top:"50%", transform:"translateY(-50%)",
-    background:"transparent", border:"none", cursor:"pointer",
-    fontSize:18, lineHeight:1,
+    background:"transparent", border:"none", cursor:"pointer", fontSize:18, lineHeight:1,
   },
 
   // location picker – feedback cards
   locError: {
-    background:"#2a1010", border:`1px solid ${RED}55`,
-    borderRadius:8, color:"#f87171",
-    padding:"10px 14px", fontSize:13, fontFamily:"monospace",
+    background:"#1e0a0a", border:`1px solid ${RED}44`,
+    borderRadius:8, color:"#f87171", padding:"10px 14px", fontSize:13, fontFamily:"monospace",
   },
   locAddressCard: {
-    background:"#0f1f0f", border:`1px solid #4caf5044`,
+    background:"#0d1a0d", border:`1px solid #4caf5033`,
     borderRadius:8, padding:"12px 14px",
   },
-  locAddressLabel: { fontSize:13, fontWeight:"bold", color:"#4caf50", marginBottom:4, fontFamily:"monospace" },
+  locAddressLabel: { fontSize:13, fontWeight:"bold", color:GREEN, marginBottom:4, fontFamily:"monospace" },
   locAddressText:  { fontSize:13, color:TEXT, lineHeight:1.5 },
   locCoordsCard: {
     background:"#1a1a1a", border:`1px solid ${BORDER}`,
-    borderRadius:8, padding:"10px 14px",
-    fontSize:12, color:MUTED, fontFamily:"monospace",
+    borderRadius:8, padding:"10px 14px", fontSize:12, color:MUTED, fontFamily:"monospace",
   },
 
   // location picker – static map
-  locMap: { width:"100%", borderRadius:10, border:`1px solid ${BORDER}`, display:"block", marginTop:4 },
+  locMap: { width:"100%", borderRadius:10, border:`1px solid ${BORDER2}`, display:"block", marginTop:4 },
 };

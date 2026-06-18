@@ -1,0 +1,106 @@
+[
+  {
+    "id": 13,
+    "text": "¡Pene, amigos! ¡Pene!",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T12:31:39.642353",
+    "date": "2026-06-18 12:31:39"
+  },
+  {
+    "id": 12,
+    "text": "¡Piquen!",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:22:46.504261",
+    "date": "2026-06-18 07:22:46"
+  },
+  {
+    "id": 11,
+    "text": "Quiero margarita",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:22:17.346163",
+    "date": "2026-06-18 07:22:17"
+  },
+  {
+    "id": 10,
+    "text": "Quiero una...",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:20:59.167495",
+    "date": "2026-06-18 07:20:59"
+  },
+  {
+    "id": 9,
+    "text": "Me, me, no...",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:09:13.715388",
+    "date": "2026-06-18 07:09:13"
+  },
+  {
+    "id": 8,
+    "text": "Me...",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:09:00.939471",
+    "date": "2026-06-18 07:09:00"
+  },
+  {
+    "id": 7,
+    "text": "Prómeno... ...meno...",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:08:50.084779",
+    "date": "2026-06-18 07:08:50"
+  },
+  {
+    "id": 6,
+    "text": "¡Bixa!",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:08:30.911382",
+    "date": "2026-06-18 07:08:30"
+  },
+  {
+    "id": 5,
+    "text": "Fixa, muestra bien.",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:07:12.960377",
+    "date": "2026-06-18 07:07:12"
+  },
+  {
+    "id": 4,
+    "text": "¡Todo! ¡Quiero una fixa!",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T07:06:44.992138",
+    "date": "2026-06-18 07:06:44"
+  },
+  {
+    "id": 3,
+    "text": "No, no, no gracias.",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T06:22:41.911444",
+    "date": "2026-06-18 06:22:41"
+  },
+  {
+    "id": 2,
+    "text": "No hay nada que...",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T06:22:29.858295",
+    "date": "2026-06-18 06:22:29"
+  },
+  {
+    "id": 1,
+    "text": "Puroando, porabando.",
+    "language": "es-ES",
+    "user_id": null,
+    "timestamp": "2026-06-18T06:21:49.395503",
+    "date": "2026-06-18 06:21:49"
+  }
+]

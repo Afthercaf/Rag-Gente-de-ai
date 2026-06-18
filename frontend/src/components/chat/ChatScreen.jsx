@@ -4,6 +4,7 @@ import { logout } from "../../api/auth";
 import { clearSession } from "../../utils/session";
 import { nextId, getOrderSteps } from "../../utils/orderUtils";
 import { useOrderStatus } from "../../hooks/useOrderStatus.js";
+import { useVoiceRecognition } from "../../hooks/useVoiceRecognition";
 import { s } from "../../styles/theme";
 import { MessageBubble } from "./MessageBubble";
 import OrderStep from "./OrderStep";
@@ -24,39 +25,73 @@ export default function ChatScreen({ user, onLogout }) {
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false); // Evita doble envío
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
   const lastReportedStatus = useRef(null);
   const bottomRef = useRef(null);
+  const inputRef = useRef(null);
+  const sendTimeoutRef = useRef(null);
+
+  // ── Voice Recognition Hook ──────────────────────────────────────────────────
+  const {
+    isListening,
+    isSupported,
+    transcript,
+    interimTranscript,
+    toggleListening,
+    stopListening,
+  } = useVoiceRecognition({
+    onResult: (text) => {
+      if (text.trim()) {
+        setInput(text);
+        if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
+        sendTimeoutRef.current = setTimeout(() => {
+          if (text.trim() && !loading && !isSubmittingOrder && !orderForm) {
+            sendMessage(text.trim());
+          }
+          sendTimeoutRef.current = null;
+        }, 500);
+      }
+    },
+    onError: (errorMsg) => {
+      setVoiceError(errorMsg);
+      addMsg("bot", `🎤 ${errorMsg}`);
+      setTimeout(() => {
+        setVoiceError(null);
+        setMessages((prev) => prev.filter((m) => m.text !== `🎤 ${errorMsg}`));
+      }, 4000);
+    },
+    language: "es-ES",
+  });
+
+  // Actualizar input con transcripción en tiempo real
+  useEffect(() => {
+    if (isListening && transcript) setInput(transcript);
+  }, [transcript, isListening]);
+
+  // Limpiar timeout al desmontar
+  useEffect(() => {
+    return () => {
+      if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
+    };
+  }, []);
 
   const addMsg = (role, text, requiresAction = false) => {
     const newMsg = { id: nextId(), role, text };
-    if (requiresAction && role === "bot") {
-      newMsg.requiresLocation = true;
-    }
+    if (requiresAction && role === "bot") newMsg.requiresLocation = true;
     setMessages((m) => [...m, newMsg]);
   };
 
   const { status: orderStatus, label: orderLabel, isDone } = useOrderStatus(activeOrderId);
 
-// ✅ CORRECTO — notifica cualquier cambio de estado
   useEffect(() => {
-   if (!activeOrderId) return;
-   if (orderStatus === lastReportedStatus.current) return;
-
+    if (!activeOrderId) return;
+    if (orderStatus === lastReportedStatus.current) return;
     lastReportedStatus.current = orderStatus;
-
-  // No notificar el estado inicial "pendiente" — ya se mencionó al confirmar el pedido
-    if (orderStatus !== "pendiente") {
-      addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
-    }
-
+    if (orderStatus !== "pendiente") addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
   }, [orderStatus, activeOrderId, orderLabel]);
 
-  useEffect(() => {
-    if (isDone) {
-      setActiveOrderId(null);
-    }
-  }, [isDone]);
+  useEffect(() => { if (isDone) setActiveOrderId(null); }, [isDone]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -73,82 +108,42 @@ export default function ChatScreen({ user, onLogout }) {
 
   const sendMessage = async (text) => {
     if (!text.trim()) return;
+    if (isListening) stopListening();
     addMsg("user", text);
     setInput("");
-
-
-
     setLoading(true);
     try {
-const data = await sendChat(
-  text,
-  user.id
-);
+      const data = await sendChat(text, user.id);
       addMsg("bot", data.reply);
-      
-      // Detectar si el bot sugiere pedido
-if (data.is_order) {
-
-  const orderText =
-    data.order_details?.raw || text;
-  const orderTotal = data.order_details?.total || null;
-
-  const missingFields = [];
-
-  if (!user?.nombre)
-    missingFields.push("cliente_nombre");
-
-  if (!user?.telefono)
-    missingFields.push("telefono");
-
-  if (!user?.gmail)
-    missingFields.push("gmail");
-
-  if (!user?.direccion)
-    missingFields.push("direccion");
-
-  setPendingOrderData({
-    pedido: orderText,
-    data: {
-      cliente_nombre: user?.nombre || "",
-      telefono: user?.telefono || "",
-      gmail: user?.gmail || "",
-      direccion: user?.direccion || "",
-      total: orderTotal,
-      payment_method: "efectivo",
-    },
-  });
-
-  if (missingFields.length > 0) {
-
-    setOrderForm({
-      pedido: orderText,
-      step: 0,
-      data: {
-        cliente_nombre: user?.nombre || "",
-        telefono: user?.telefono || "",
-        gmail: user?.gmail || "",
-        direccion: user?.direccion || "",
-        total: orderTotal,
-      },
-    });
-
-    addMsg(
-      "bot",
-      "🛵 Necesito algunos datos para completar tu pedido."
-    );
-
-  } else {
-
-    addMsg(
-      "bot",
-      "📍 Comparte tu ubicación para confirmar el pedido.",
-      true
-    );
-
-  }
-}
-      
+      if (data.is_order) {
+        const orderText = data.order_details?.raw || text;
+        const orderTotal = data.order_details?.total || null;
+        const missingFields = [];
+        if (!user?.nombre)    missingFields.push("cliente_nombre");
+        if (!user?.telefono)  missingFields.push("telefono");
+        if (!user?.gmail)     missingFields.push("gmail");
+        if (!user?.direccion) missingFields.push("direccion");
+        setPendingOrderData({
+          pedido: orderText,
+          data: {
+            cliente_nombre: user?.nombre || "",
+            telefono: user?.telefono || "",
+            gmail: user?.gmail || "",
+            direccion: user?.direccion || "",
+            total: orderTotal,
+            payment_method: "efectivo",
+          },
+        });
+        if (missingFields.length > 0) {
+          setOrderForm({
+            pedido: orderText, step: 0,
+            data: { cliente_nombre: user?.nombre || "", telefono: user?.telefono || "", gmail: user?.gmail || "", direccion: user?.direccion || "", total: orderTotal },
+          });
+          addMsg("bot", "🛵 Necesito algunos datos para completar tu pedido.");
+        } else {
+          addMsg("bot", "📍 Comparte tu ubicación para confirmar el pedido.", true);
+        }
+      }
     } catch (err) {
       addMsg("bot", `❌ ${err.message}`);
     } finally {
@@ -165,70 +160,34 @@ if (data.is_order) {
 
   const submitOrderStep = async (value) => {
     if (!orderForm || isSubmittingOrder) return;
-    
     const step = ORDER_STEPS[orderForm.step];
     const newData = { ...orderForm.data, [step.key]: value };
     addMsg("user", value);
-
     if (orderForm.step < ORDER_STEPS.length - 1) {
       setOrderForm({ ...orderForm, step: orderForm.step + 1, data: newData });
     } else {
-      // Guardar datos y abrir location picker
-      setPendingOrderData({
-        pedido: normalizeOrderText(orderForm.pedido),
-        data: {
-          ...newData,
-          payment_method: "efectivo"
-        }
-      });
+      setPendingOrderData({ pedido: normalizeOrderText(orderForm.pedido), data: { ...newData, payment_method: "efectivo" } });
       setOrderForm(null);
-      
       addMsg("bot", "📍 Para completar tu pedido, necesito tu ubicación exacta.", true);
     }
   };
 
-  // CORREGIDO: Con flag para evitar doble envío
   const handleLocationConfirm = async (location) => {
-    // Evitar llamadas concurrentes
-    if (isSubmittingOrder) {
-      console.log("⚠️ Ya hay un pedido en proceso, ignorando...");
-      return;
-    }
-    
+    if (isSubmittingOrder) return;
     if (!pendingOrderData) {
-      console.error("❌ No hay datos del pedido pendiente");
       addMsg("bot", "❌ Error: No se encontraron datos del pedido. Por favor, intenta nuevamente.");
       setShowLocationPicker(false);
       return;
     }
-    
     setShowLocationPicker(false);
     setLoading(true);
     setIsSubmittingOrder(true);
-    
     try {
       const orderData = pendingOrderData;
       const pedidoText = normalizeOrderText(orderData.pedido);
-      console.log("📦 Enviando pedido:", pedidoText);
-      console.log("👤 Datos cliente:", orderData.data);
-      console.log("📍 Ubicación:", location);
-      
-      // Usar la función placeOrder del API
-const result = await placeOrder(
-  user.id,
-  pedidoText,
-  orderData.data,
-  location
-);
-      
-      console.log("📬 Respuesta del servidor:", result);
-      
+      const result = await placeOrder(user.id, pedidoText, orderData.data, location);
       if (result.success) {
-        addMsg(
-          "bot",
-          `✅ ¡Pedido #${result.order_id} confirmado!${result.total ? `\n💰 Total: ${result.total}` : ""}\n📍 Ubicación recibida.\n🍕 Te avisaré cuando el estado cambie.`
-        );
-        
+        addMsg("bot", `✅ ¡Pedido #${result.order_id} confirmado!${result.total ? `\n💰 Total: ${result.total}` : ""}\n📍 Ubicación recibida.\n🍕 Te avisaré cuando el estado cambie.`);
         lastReportedStatus.current = "pendiente";
         setActiveOrderId(String(result.order_id));
         setPendingOrderData(null);
@@ -236,7 +195,6 @@ const result = await placeOrder(
         addMsg("bot", `❌ Error al crear el pedido: ${result.message || "Intenta nuevamente"}`);
       }
     } catch (err) {
-      console.error("❌ Error al enviar pedido:", err);
       addMsg("bot", `❌ Error al procesar el pedido: ${err.message}`);
     } finally {
       setLoading(false);
@@ -244,10 +202,27 @@ const result = await placeOrder(
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    clearSession();
-    onLogout();
+  const handleLogout = async () => { await logout(); clearSession(); onLogout(); };
+
+  const handleVoiceClick = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      if (input) setInput("");
+      toggleListening();
+    }
+  };
+
+  // ── Estilo dinámico del textarea ────────────────────────────────────────────
+  const textareaStyle = {
+    ...s.textarea,
+    ...(isListening ? s.textareaListening : {}),
+  };
+
+  // ── Estilo dinámico del mic button ─────────────────────────────────────────
+  const micBtnStyle = {
+    ...s.micBtn,
+    ...(isListening ? s.micBtnActive : {}),
   };
 
   return (
@@ -255,15 +230,20 @@ const result = await placeOrder(
       <div style={s.root}>
         <div style={s.bgPattern} />
         <div style={s.shell}>
+
+          {/* ── Header ────────────────────────────────────────────────────────── */}
           <header style={s.header}>
             <div style={s.logoWrap}>
               <span style={s.logoEmoji}>🍕</span>
               <div>
                 <div style={s.logoName}>Pizzería 220</div>
-                <div style={s.logoSub}>Asistente IA · Online</div>
+                <div style={s.logoSub}>
+                  <span style={s.logoSubDot} />
+                  Asistente IA · Online
+                </div>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <div style={s.userBadge}>
                 <span style={s.userInitial}>{(user?.nombre || "U")[0].toUpperCase()}</span>
                 <span style={s.userName}>{user?.nombre}</span>
@@ -274,35 +254,30 @@ const result = await placeOrder(
             </div>
           </header>
 
+          {/* ── Feed ──────────────────────────────────────────────────────────── */}
           <div style={s.feed}>
             {messages.map((msg) => (
               <div key={msg.id}>
                 <MessageBubble msg={msg} />
-{/* ✅ Solo mostrar botón si aún hay un pedido pendiente de ubicación */}
-{msg.requiresLocation && !showLocationPicker && !loading && pendingOrderData && (
-  <div style={{ marginTop: 8, marginLeft: 50 }}>
-    <button
-      onClick={() => setShowLocationPicker(true)}
-      disabled={isSubmittingOrder}
-      style={{
-        backgroundColor: "#10b981",
-        color: "white",
-        padding: "8px 16px",
-        borderRadius: 8,
-        border: "none",
-        cursor: isSubmittingOrder ? "not-allowed" : "pointer",
-        fontSize: 14,
-        fontWeight: "bold",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        opacity: isSubmittingOrder ? 0.5 : 1
-      }}
-    >
-      📍 Compartir mi ubicación
-    </button>
-  </div>
-)}
+                {msg.requiresLocation && !showLocationPicker && !loading && pendingOrderData && (
+                  <div style={{ marginTop:8, marginLeft:50 }}>
+                    <button
+                      onClick={() => setShowLocationPicker(true)}
+                      disabled={isSubmittingOrder}
+                      style={{
+                        backgroundColor:"#10b981", color:"white",
+                        padding:"8px 16px", borderRadius:8, border:"none",
+                        cursor: isSubmittingOrder ? "not-allowed" : "pointer",
+                        fontSize:14, fontWeight:"bold",
+                        display:"inline-flex", alignItems:"center", gap:8,
+                        opacity: isSubmittingOrder ? 0.5 : 1,
+                        boxShadow:"0 2px 10px rgba(16,185,129,.25)",
+                      }}
+                    >
+                      📍 Compartir mi ubicación
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
 
@@ -314,26 +289,59 @@ const result = await placeOrder(
             <div ref={bottomRef} />
           </div>
 
+          {/* ── Input bar ─────────────────────────────────────────────────────── */}
           {!orderForm && (
             <div style={s.inputBar}>
+
+              {/* Botón de voz */}
+              {isSupported && (
+                <button
+                  onClick={handleVoiceClick}
+                  disabled={loading || isSubmittingOrder}
+                  style={micBtnStyle}
+                  title={isListening ? "Detener grabación" : "Activar voz"}
+                >
+                  {/* Ripples — solo visibles mientras escucha */}
+                  {isListening && (
+                    <>
+                      <span style={s.micRipple} />
+                      <span style={s.micRipple2} />
+                    </>
+                  )}
+
+                  {/* Ícono o barras de onda */}
+                  {isListening ? (
+                    <span style={s.micWave}>
+                      {[s.micWaveBar1, s.micWaveBar2, s.micWaveBar3, s.micWaveBar4, s.micWaveBar5].map((anim, i) => (
+                        <span key={i} style={{ ...s.micWaveBar, ...anim }} />
+                      ))}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize:17 }}>🎤</span>
+                  )}
+                </button>
+              )}
+
               <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+                ref={inputRef}
+                value={isListening ? `${transcript || ""} ${interimTranscript || ""}`.trim() : input}
+                onChange={(e) => { if (!isListening) setInput(e.target.value); }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if (e.key === "Enter" && !e.shiftKey && !isListening) {
                     e.preventDefault();
                     sendMessage(input);
                   }
                 }}
-                placeholder="Pregunta sobre el menú, promos o escribe tu pedido…"
+                placeholder={isListening ? "🎤 Habla ahora..." : "Pregunta sobre el menú, promos o escribe tu pedido…"}
                 rows={1}
-                style={s.textarea}
-                disabled={loading || isSubmittingOrder}
+                style={textareaStyle}
+                disabled={loading || isSubmittingOrder || isListening}
               />
+
               <button
                 onClick={() => sendMessage(input)}
-                disabled={loading || isSubmittingOrder || !input.trim()}
-                style={{ ...s.sendBtn, opacity: loading || isSubmittingOrder || !input.trim() ? 0.4 : 1 }}
+                disabled={loading || isSubmittingOrder || !input.trim() || isListening}
+                style={{ ...s.sendBtn, opacity: (loading || isSubmittingOrder || !input.trim() || isListening) ? 0.35 : 1 }}
               >
                 <SendIcon />
               </button>
@@ -342,6 +350,43 @@ const result = await placeOrder(
         </div>
       </div>
 
+      {/* ── Toast flotante de escucha ──────────────────────────────────────────── */}
+      {isListening && (
+        <div style={s.listenToast}>
+          <span style={s.listenDot} />
+          <span>Escuchando...</span>
+          {interimTranscript && (
+            <span style={s.listenInterim}>"{interimTranscript}"</span>
+          )}
+          <button
+            style={s.cancelBtn}
+            onClick={() => {
+              stopListening();
+              setInput("");
+              if (sendTimeoutRef.current) {
+                clearTimeout(sendTimeoutRef.current);
+                sendTimeoutRef.current = null;
+              }
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* ── Voz no soportada ──────────────────────────────────────────────────── */}
+      {!isSupported && (
+        <div style={{
+          position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
+          background:"rgba(239,68,68,.9)", color:"#fff",
+          padding:"10px 20px", borderRadius:12, fontSize:13, zIndex:1000,
+          backdropFilter:"blur(10px)",
+        }}>
+          ⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.
+        </div>
+      )}
+
+      {/* ── Location Picker ───────────────────────────────────────────────────── */}
       {showLocationPicker && (
         <LocationPicker
           onLocationSelect={handleLocationConfirm}

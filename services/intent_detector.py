@@ -293,6 +293,7 @@ def build_directive(
 
         # Paso 2 → usuario respondió ingredientes, avanzar a extras
         if active_step == 2:
+            # Si el usuario responde "no" a los ingredientes, es válido (sin cambios)
             print("✅ [DEBUG] Caso: FLUJO PASO 2 (extras)")
             extras_disponibles = "Queso extra, Orilla de queso, Pepperoni extra"
             return (
@@ -322,7 +323,7 @@ def build_directive(
                 f"¿Confirmas tu pedido? ✅"
             )
 
-    # ── 2. NUEVA PIZZA MENCIONADA ─────────────────────────────────
+    # ── 3. NUEVA PIZZA MENCIONADA ─────────────────────────────────
     pizza_found = has_pizza_name(question, pizza_names)
     print(f"🔍 [DEBUG] pizza_found: {pizza_found}")
     
@@ -347,7 +348,7 @@ def build_directive(
             f"'¿Qué tamaño deseas? Tenemos: {tamanos_disponibles} 🍕'"
         )
 
-    # ── 3. QUIERE ORDENAR SIN ESPECIFICAR PIZZA ───────────────────
+    # ── 4. QUIERE ORDENAR SIN ESPECIFICAR PIZZA ───────────────────
     if has_order_intent(question):
         print("✅ [DEBUG] Caso: ORDENAR SIN PIZZA")
         return (
@@ -356,7 +357,7 @@ def build_directive(
             "Al final pregunta: '¿Cuál te llama la atención? 🍕'"
         )
 
-    # ── 4. SALUDO DE CLIENTE FRECUENTE (CASO A) ───────────────────
+    # ── 5. SALUDO DE CLIENTE FRECUENTE (CASO A) ───────────────────
     # Condiciones estrictas para CASO A:
     # 1. Es solo un saludo (sin palabras de orden)
     # 2. No contiene nombre de pizza
@@ -377,7 +378,7 @@ def build_directive(
             f"'¡Hola! 😊 La última vez pediste {last_order}. ¿Te gustaría ordenar lo mismo o prefieres ver el menú completo?'"
         )
 
-    # ── 5. INFORMACIÓN GENERAL ────────────────────────────────────
+    # ── 6. INFORMACIÓN GENERAL ────────────────────────────────────
     print("✅ [DEBUG] Caso: INFORMACIÓN GENERAL (default)")
     return (
         "Responde con la información disponible en el CONTEXTO. "
