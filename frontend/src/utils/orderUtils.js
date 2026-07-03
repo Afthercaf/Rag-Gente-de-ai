@@ -1,4 +1,3 @@
-
 /**
  * Devuelve true si el texto parece un pedido.
  * @param {string} text
@@ -23,7 +22,7 @@ export const ALL_ORDER_STEPS = [
     key: "payment_method",
     label: "💳 Método de pago",
     type: "select",
-    options: ["efectivo", "tarjeta"],
+    options: ["efectivo", "mercado_pago"],
   },
 ];
 

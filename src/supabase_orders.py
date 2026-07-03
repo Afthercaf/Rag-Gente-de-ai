@@ -64,8 +64,8 @@ def create_order(data: dict) -> str | None:
 
 
 def update_order_status(order_id: str, status: str) -> bool:
+    """Actualiza el estado de una orden."""
     try:
-
         print(f"\n🔄 Actualizando pedido {order_id}")
         print(f"📌 Nuevo estado: {status}")
 
@@ -83,28 +83,23 @@ def update_order_status(order_id: str, status: str) -> bool:
             return False
 
         if response.status_code == 200:
-
             try:
                 data = response.json()
-
                 print("DATA:", data)
-
                 if isinstance(data, list) and len(data) == 0:
                     print("❌ No existe pedido con ese ID")
                     return False
-
             except Exception:
                 pass
 
         print("✅ Pedido actualizado")
-
         return True
 
     except Exception as e:
-
         print("❌ ERROR SUPABASE:", e)
-
         return False
+
+
 def get_order_status(order_id: str) -> str:
     """
     Consulta el estado actual de una orden en Supabase.
@@ -146,3 +141,83 @@ def get_order_by_id(order_id: str) -> Optional[dict]:
     except Exception as e:
         logger.error(f"Error en get_order_by_id: {e}")
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NUEVA FUNCIÓN: Actualizar información de pago
+# ═══════════════════════════════════════════════════════════════════
+
+def update_payment_info(
+    order_id: int,
+    payment_id: str,
+    payment_url: str,
+    payment_status: str,
+    preference_id: Optional[str] = None,
+) -> bool:
+    """
+    Actualiza la información de pago en la tabla ordenes.
+    
+    Args:
+        order_id: ID del pedido
+        payment_id: ID del pago en Mercado Pago
+        payment_url: URL del link de pago
+        payment_status: Estado del pago (pending, approved, etc.)
+        preference_id: ID de la preferencia (opcional, por defecto usa payment_id)
+    
+    Returns:
+        True si se actualizó correctamente, False en caso contrario
+    """
+    try:
+        logger.info(f"💳 Actualizando información de pago para orden {order_id}")
+        logger.info(f"   Payment ID: {payment_id}")
+        logger.info(f"   Payment URL: {payment_url}")
+        logger.info(f"   Payment Status: {payment_status}")
+        
+        # Construir datos a actualizar
+        data = {
+            "payment_id": payment_id,
+            "payment_url": payment_url,
+            "payment_status": payment_status,
+        }
+        
+        # Si no se proporciona preference_id, usar payment_id
+        if preference_id:
+            data["preference_id"] = preference_id
+        else:
+            data["preference_id"] = payment_id
+        
+        print(f"\n🔄 Actualizando información de pago para pedido {order_id}")
+        print(f"📌 Datos: {data}")
+        
+        response = SESSION.patch(
+            f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
+            headers=HEADERS,
+            json=data,
+            timeout=30,
+        )
+        
+        print("STATUS:", response.status_code)
+        print("BODY:", response.text)
+        
+        if response.status_code not in [200, 204]:
+            logger.error(f"❌ Error actualizando pago: {response.text}")
+            return False
+        
+        if response.status_code == 200:
+            try:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    logger.info(f"✅ Información de pago actualizada para orden {order_id}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ No se encontró la orden {order_id}")
+                    return False
+            except Exception:
+                pass
+        
+        logger.info(f"✅ Información de pago actualizada para orden {order_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error en update_payment_info: {e}")
+        return False

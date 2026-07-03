@@ -9,7 +9,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from core.lifespan import lifespan
-from routers import auth, cache, chat, health, orders, voice
+from routers import auth, cache, chat, health, orders, voice, payment
 from utils.constants import ALLOWED_ORIGINS
 
 app = FastAPI(
@@ -36,6 +36,7 @@ app.include_router(auth.router)
 app.include_router(orders.router)
 app.include_router(cache.router)
 app.include_router(voice.router)
+app.include_router(payment.router)
 
 # ── Global error handler ───────────────────────────────────────
 @app.exception_handler(Exception)

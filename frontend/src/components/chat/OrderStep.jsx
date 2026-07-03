@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { s } from "../../styles/theme";
 
+// Etiquetas visibles para cada valor real de payment_method.
+// Si se agrega un nuevo método de pago, solo hay que añadirlo aquí.
+const PAYMENT_LABELS = {
+  efectivo: "💵 Efectivo",
+  mercado_pago: "💳 Mercado Pago",
+};
+
 /**
  * Muestra un paso del flujo de pedido: input de texto o selector de opciones.
  *
@@ -30,7 +37,7 @@ export default function OrderStep({ step, onSubmit }) {
               onClick={() => onSubmit(opt)}
               style={{ ...s.optBtn, ...(val === opt ? s.optBtnActive : {}) }}
             >
-              {opt === "efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}
+              {PAYMENT_LABELS[opt] || opt}
             </button>
           ))}
         </div>

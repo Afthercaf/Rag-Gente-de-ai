@@ -7,30 +7,41 @@ USER_SESSIONS: Dict[int, Dict[str, Any]] = {}
 
 
 def _normalize_history_records(records: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """Convierte registros de Supabase en pares {user, assistant}."""
+    """
+    Convierte registros de Supabase en pares {user, assistant}.
+    
+    CORRECCIÓN: Ahora maneja correctamente los casos donde un mensaje
+    puede venir sin su par correspondiente.
+    """
     history: List[Dict[str, str]] = []
-    current: Dict[str, str] = {}
+    current: Dict[str, str] = {"user": "", "assistant": ""}
 
     for msg in records:
         role = msg.get("role", "")
         content = msg.get("content", "")
 
         if role == "user":
-            if current:
-                if "assistant" not in current:
-                    current["assistant"] = ""
+            # Si ya hay un par anterior incompleto, guardarlo primero
+            if current.get("user") and not current.get("assistant"):
+                # Intentar buscar el assistant en el siguiente mensaje
+                # pero por ahora guardamos lo que tenemos
                 history.append(current)
-                current = {}
+                current = {"user": "", "assistant": ""}
             current["user"] = content
         elif role == "assistant":
-            if not current:
-                current = {"user": ""}
-            current["assistant"] = content
-            history.append(current)
-            current = {}
+            if not current.get("user"):
+                # Si no hay user, crear un par vacío
+                current = {"user": "", "assistant": content}
+                history.append(current)
+                current = {"user": "", "assistant": ""}
+            else:
+                current["assistant"] = content
+                history.append(current)
+                current = {"user": "", "assistant": ""}
 
-    if current:
-        if "assistant" not in current:
+    # Si quedó algo pendiente, guardarlo
+    if current.get("user") or current.get("assistant"):
+        if not current.get("assistant"):
             current["assistant"] = ""
         history.append(current)
 
@@ -56,7 +67,17 @@ def append_to_history(session: Dict[str, Any], user_id: int, user_msg: str, assi
     session["history"] = session["history"][-20:]
 
     if user_id > 0:
+        # CORRECCIÓN: antes solo se insertaba el mensaje "user" y el "assistant"
+        # nunca se persistía en Supabase. Esto provocaba que, al reconstruir el
+        # historial tras un reinicio del proceso (ej. uvicorn --reload), todos
+        # los registros tuvieran role="user" y _normalize_history_records
+        # generara pares con "assistant": "" — rompiendo _get_flow_start, que
+        # depende de encontrar "tamaño" en el texto del asistente para detectar
+        # el inicio del flujo de pedido. Sin esa señal, el flujo activo se
+        # perdía por completo y build_directive caía siempre al caso default
+        # ("No hay datos disponibles.").
         insert_chat_history(user_id, "user", user_msg)
+        insert_chat_history(user_id, "assistant", assistant_msg)
 
 
 def build_history_text(session: Dict[str, Any], last_n: int = 10) -> str:

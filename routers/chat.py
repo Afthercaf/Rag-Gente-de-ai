@@ -8,6 +8,7 @@ from core.decorators import measure_time
 from core.state import state
 from schemas.chat import ChatRequest, QuickReplyRequest
 from services import llm_service, rag_service
+from services.intent_detector import is_order_flow_active
 from services.session_service import (
     append_to_history,
     build_enriched_query,
@@ -53,8 +54,31 @@ async def chat(req: ChatRequest):
     session = get_user_session(req.user_id)
     print(f"👤 Usuario: {req.user_id} | 🧠 Historial: {len(session['history'])} msgs")
 
+    # ── Pizzas del RAG + ¿hay un flujo de pedido activo? ──────────
+    # Se necesita saber esto ANTES de consultar la caché (ver más
+    # abajo). Si falla la consulta al RAG aquí, no se rompe el
+    # endpoint completo — se asume "sin flujo activo" y se continúa;
+    # cualquier error real durante la generación de la respuesta lo
+    # sigue cubriendo el try/except de abajo.
+    try:
+        pizza_names = rag_service.get_pizza_names()
+    except Exception:
+        pizza_names = []
+    flow_active = is_order_flow_active(session["history"], pizza_names)
+
     # Cache
-    if req.use_cache:
+    # FIX: la caché se indexaba SOLO por "user_id:texto del mensaje",
+    # sin considerar en qué paso del flujo de pedido está el cliente.
+    # Eso hacía que un "no" (o cualquier texto repetido más tarde en la
+    # misma conversación) devolviera, desde caché, la respuesta de OTRO
+    # punto del flujo en vez de avanzar el paso actual de ingredientes/
+    # extras — exactamente el riesgo que ya advertía la documentación
+    # de is_order_flow_active() en intent_detector.py, pero que nunca
+    # se conectó aquí. Mientras el flujo está activo, la respuesta
+    # correcta depende del HISTORIAL completo, no solo del texto del
+    # mensaje — así que se omite la caché por completo en ese caso.
+    cache_key = None
+    if req.use_cache and not flow_active:
         cache_key = get_cache_key(f"{req.user_id}:{query}")
         cached = response_cache.get(cache_key)
         if cached:
@@ -62,14 +86,13 @@ async def chat(req: ChatRequest):
             return JSONResponse(content=cached)
 
     try:
-        # ✅ Nombres dinámicos desde RAG (con caché interno)
-        pizza_names = rag_service.get_pizza_names()
+        # ✅ Nombres dinámicos desde RAG (ya obtenidos arriba)
         is_new_order = is_new_order_query(query, pizza_names)
         print(f"🍕 Pizzas detectadas del RAG: {pizza_names}")
         print(f"🆕 Es nuevo pedido: {is_new_order}")
 
         history_text = "" if is_new_order else build_history_text(session)
-        search_query = query if is_new_order else build_enriched_query(session, query)
+        search_query = query
         print(f"🔍 Búsqueda RAG: {search_query}")
 
         rag_context = await rag_service.retrieve_context(search_query)
@@ -95,7 +118,7 @@ async def chat(req: ChatRequest):
             "user_id": req.user_id,
         }
 
-        if req.use_cache:
+        if req.use_cache and cache_key is not None:
             response_cache.set(cache_key, result)
 
         return JSONResponse(content=result)
