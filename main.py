@@ -11,6 +11,7 @@ from src.telegram_bot import run_bot
 from src.supabase_orders import create_order
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import OllamaEmbeddings, ChatOllama
+from utils.constants import CHAT_MODEL, EMBED_MODEL, OLLAMA_BASE_URL
 
 # ==========================================
 # INICIAR BOT DE TELEGRAM (CON MANEJO DE ERRORES)
@@ -61,8 +62,8 @@ print(f"✅ Promociones: {len(promo_documents)} activas")
 # ==========================================
 # EMBEDDINGS Y BASE VECTORIAL
 # ==========================================
-print("\n🔧 Generando embeddings...")
-embedding_model = OllamaEmbeddings(model=EMBED_MODEL)
+print("\n🔧 Generando embeddings... ")
+embedding_model = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
 db = save_to_chroma_db(pdf_documents, embedding_model)
 print("✅ Base vectorial lista.\n")
 
@@ -96,7 +97,7 @@ PREGUNTA:
 """
 
 prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-model = ChatOllama(model=CHAT_MODEL, temperature=0.2, num_ctx=4096)
+model = ChatOllama(model=CHAT_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.2, num_ctx=4096)
 
 # ==========================================
 # FUNCIONES AUXILIARES

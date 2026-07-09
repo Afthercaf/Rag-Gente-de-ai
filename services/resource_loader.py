@@ -1,14 +1,12 @@
 import asyncio
 import time
 
-from langchain_ollama import OllamaEmbeddings
-
 from core.state import state
 from prompts.pizza_prompt import pizza_prompt
 from src.chroma_db import save_to_chroma_db
 from src.file_processor import chunk_pdfs
 from src.supabase_promos import load_promotions
-from utils.constants import EMBED_MODEL
+from services.provider_service import provider_service
 
 
 async def load_resources_background() -> None:
@@ -24,10 +22,7 @@ async def load_resources_background() -> None:
 
         # 2. Modelo de embeddings
         print("🔤 Cargando modelo de embeddings...")
-        state["embedding_model"] = await asyncio.to_thread(
-            OllamaEmbeddings,
-            model=EMBED_MODEL,
-        )
+        state["embedding_model"] = provider_service.embedding_provider.get_model()
         print("✅ Modelo de embeddings listo")
 
         # 3. PDFs → ChromaDB

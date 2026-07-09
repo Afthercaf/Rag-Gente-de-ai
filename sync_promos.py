@@ -3,14 +3,13 @@ import time
 from src.file_processor import chunk_pdfs
 from src.supabase_promos import load_promotions
 from src.chroma_db import save_to_chroma_db
+from utils.constants import EMBED_MODEL, OLLAMA_BASE_URL
 
 from langchain_ollama import OllamaEmbeddings
 
-
-EMBED_MODEL = "nomic-embed-text"
-
 embedding_model = OllamaEmbeddings(
-    model=EMBED_MODEL
+    model=EMBED_MODEL,
+    base_url=OLLAMA_BASE_URL,
 )
 
 last_total = 0

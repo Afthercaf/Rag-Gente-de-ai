@@ -2,6 +2,15 @@ from langchain_core.prompts import ChatPromptTemplate
 
 PROMPT_TEMPLATE = """⚠️ INSTRUCCIONES OBLIGATORIAS - SIGUE ESTRICTAMENTE ⚠️
 
+🚨 REGLA CRÍTICA 🚨
+
+- NO muestres tu razonamiento interno.
+- NO escribas etiquetas como <think>, </think>, Thought, Analysis, Reasoning o similares.
+- NO expliques cómo llegaste a la respuesta.
+- NO repitas las instrucciones ni la directiva.
+- Devuelve ÚNICAMENTE el mensaje final que verá el cliente.
+- La respuesta debe comenzar directamente con el texto para el cliente, sin ningún texto antes.
+
 {directive}
 
 ---
@@ -34,8 +43,17 @@ HISTORIAL DE CONVERSACIÓN:
 PREGUNTA DEL CLIENTE:
 {question}
 
-RESPUESTA (siguiendo ESTRICTAMENTE la DIRECTIVA):
+---
+RESPUESTA:
+
+Devuelve únicamente el mensaje para el cliente.
+
+No agregues explicaciones.
+No agregues razonamiento.
+No uses etiquetas <think>.
+No escribas nada antes de la respuesta.
+No escribas nada después de la respuesta.
+La salida debe contener exclusivamente el texto que recibirá el cliente.
 """
 
-# Creación del objeto prompt listo para usar en tu pipeline de LangChain
 pizza_prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)

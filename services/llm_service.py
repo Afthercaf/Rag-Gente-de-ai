@@ -1,5 +1,6 @@
 import re
 import asyncio
+import logging
 from typing import Any
 from datetime import datetime
 
@@ -22,6 +23,91 @@ from services.payment_handler import (
     get_payment_status_message,
     detect_payment_intent,
 )
+
+logger = logging.getLogger(__name__)
+
+# Mensaje de respaldo cuando el modelo se "atora" repitiendo razonamiento
+# interno (<think> sin cerrar) y no llega a producir una respuesta real
+# para el cliente.
+_THINK_LOOP_FALLBACK = (
+    "¡Perdón! Tuve un problema procesando tu mensaje. "
+    "¿Podrías repetir lo que necesitas? 🍕"
+)
+
+
+def strip_think_blocks(text: str) -> str:
+    """
+    Elimina bloques de razonamiento <think>...</think>.
+
+    Esta función es segura de aplicar a CUALQUIER texto, incluyendo
+    respuestas literales generadas en Python (LITERAL_RESPONSE_PREFIX),
+    porque solo toca <think> — nunca recorta ni reordena el resto del
+    mensaje. La limpieza de preámbulos/formato de salida del LLM vive
+    en `strip_llm_preamble`, y esa NO debe aplicarse a texto literal.
+    """
+    if not text:
+        return text
+
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # ── FIX: bloque <think> sin cierre (modelo se quedó "enloopeado") ──
+    # Si el modelo entra en un loop repitiendo su razonamiento/historial y
+    # nunca llega a generar </think> (se corta por límite de tokens), el
+    # regex de arriba NO hace match (falta el cierre) y el bloque crudo se
+    # filtraba completo hacia el cliente. Detectamos ese caso explícito:
+    # si queda un <think> abierto sin su cierre, es señal de que el modelo
+    # se rompió — descartamos todo desde ahí en vez de reenviarlo.
+    open_think_match = re.search(r"<think>", cleaned, re.IGNORECASE)
+    if open_think_match and not re.search(r"</think>", cleaned, re.IGNORECASE):
+        logger.warning(
+            "strip_think_blocks: se detectó <think> sin cierre (posible loop del modelo). "
+            "Se descarta el razonamiento crudo y se devuelve fallback."
+        )
+        cleaned = cleaned[: open_think_match.start()].strip()
+        if not cleaned:
+            # No quedó nada útil antes del <think> -> no hay mensaje real para el cliente.
+            return _THINK_LOOP_FALLBACK
+
+    return cleaned.strip()
+
+
+def strip_llm_preamble(text: str) -> str:
+    """
+    Limpia preámbulos de instrucción que el LLM a veces repite antes del
+    mensaje real para el cliente (ej. "El cliente respondió... reglas
+    obligatorias... ¡Hola! ...").
+
+    ⚠️ Aplicar SOLO a respuestas que efectivamente vinieron del modelo.
+    NO aplicar a texto literal generado en Python (LITERAL_RESPONSE_PREFIX):
+    ese texto ya está limpio, y el recorte "quedarse desde el primer
+    ¡/✅/🍕" puede destruir mensajes legítimos que solo tienen un emoji
+    decorativo al final (ej. "...menú completo. ¿Cuál te llama la
+    atención? 🍕" quedaba reducido a solo "🍕").
+    """
+    if not text:
+        return text
+
+    cleaned = text
+
+    # Quitar preámbulos de instrucción que el modelo a veces repite en la respuesta.
+    patterns = [
+        r"(?is)\b(?:el cliente respondió|el cliente saludó|respond[eé] con este formato exacto).*?\b(?:reglas obligatorias|reglas|formato exacto)\b\s*",
+        r"(?is)\b(?:extras \(copia cada línea con • tal como aparece\):|regras obligatorias|reglas obligatorias)\b\s*",
+    ]
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned)
+
+    # Si la respuesta empieza con texto de instrucción y luego una respuesta real,
+    # quedarse con la parte que parece ser el mensaje para el cliente.
+    if "¡" in cleaned:
+        cleaned = cleaned[cleaned.find("¡") :]
+    elif "✅" in cleaned:
+        cleaned = cleaned[cleaned.find("✅") :]
+    elif "🍕" in cleaned:
+        cleaned = cleaned[cleaned.find("🍕") :]
+
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
 
 
 async def generate_response(
@@ -154,7 +240,7 @@ Total a pagar: **{total if total else "Consultando..."}**
         # se devuelve el texto directo, sin invocar al modelo.
         if directive.startswith(LITERAL_RESPONSE_PREFIX):
             print("⚡ [LOG] Resumen final generado en Python — se omite la llamada al LLM.")
-            return directive[len(LITERAL_RESPONSE_PREFIX):]
+            return strip_think_blocks(directive[len(LITERAL_RESPONSE_PREFIX):])
 
     # ── CONSTRUIR CONTEXTO COMPLETO ──────────────────────────────
     full_context = context
@@ -200,6 +286,8 @@ Total a pagar: **{total if total else "Consultando..."}**
     )
 
     raw_response = response.content.strip()
+    raw_response = strip_think_blocks(raw_response)
+    raw_response = strip_llm_preamble(raw_response)
 
     # ── VALIDACIÓN POST-RESPUESTA ───────────────────────────────
     # Si la respuesta contiene precios inventados, marcarlos

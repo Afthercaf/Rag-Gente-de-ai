@@ -1,5 +1,5 @@
-# api.py - Pizzería 220 AI
-# Ejecutar con: uvicorn api:app --reload --port 8000
+# api2.py - Pizzería 220 AI
+# Ejecutar con: uvicorn api2:app --reload --port 8000
 
 import core.config  # carga .env primero
 
@@ -55,4 +55,4 @@ if __name__ == "__main__":
 
     print("🍕 Pizzería 220 AI API - Versión Modular")
     print("=" * 50)
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("api2:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

@@ -2,8 +2,7 @@ import time
 import threading
 from typing import Any, Dict
 
-from langchain_ollama import ChatOllama
-from utils.constants import CHAT_MODEL
+from services.provider_service import provider_service
 
 
 class LazyModelLoader:
@@ -14,22 +13,14 @@ class LazyModelLoader:
         self._lock = threading.Lock()
 
     @property
-    def model(self) -> ChatOllama:
+    def model(self):
         if self._model is None:
             with self._lock:
                 if self._model is None:
                     print("🔄 Cargando modelo LLM bajo demanda...")
                     start = time.time()
-                    self._model = ChatOllama(
-                        model=CHAT_MODEL,
-                        temperature=0.2,
-                        num_ctx=4096,
-                        num_predict=512,
-                        repeat_penalty=1.1,
-                        top_k=40,
-                        top_p=0.9,
-                    )
-                    print(f"✅ Modelo cargado en {time.time() - start:.2f}s")
+                    self._model = provider_service.llm_provider
+                    print(f"✅ Proveedor LLM listo en {time.time() - start:.2f}s")
         return self._model
 
 
