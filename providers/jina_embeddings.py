@@ -1,11 +1,14 @@
 import logging
 import os
-import httpx
 from typing import List
+
+import httpx
+from langchain_core.embeddings import Embeddings
 
 logger = logging.getLogger(__name__)
 
-class JinaEmbeddings:
+
+class JinaEmbeddings(Embeddings):
     """Embeddings usando Jina AI v3"""
 
     def __init__(self):
