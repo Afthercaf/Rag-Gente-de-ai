@@ -1,16 +1,16 @@
 # src/qdrant_db.py
 import logging
 import os
-from typing import List, Optional
+from typing import Optional
 
-from langchain_community.vectorstores import Qdrant
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 logger = logging.getLogger(__name__)
 
 
-class QdrantVectorStore:
+class QdrantVectorStoreWrapper:
     """Conexión a Qdrant Cloud"""
 
     def __init__(self, collection_name: str = "pizzeria_docs", vector_size: int = 1024):
@@ -37,15 +37,10 @@ class QdrantVectorStore:
         Crea la colección manualmente si no existe, usando el cliente
         low-level de qdrant (client.create_collection).
 
-        🔥 FIX: NO usamos Qdrant.from_documents() para crear la colección.
-        Ese wrapper de langchain_community arma internamente un argumento
-        `init_from` y se lo pasa siempre a client.recreate_collection(),
-        sin importar el valor de `force_recreate` que le pases. Las
-        versiones recientes de qdrant-client ya no aceptan ese argumento
-        y el proceso muere con:
-            AssertionError: Unknown arguments: ['init_from']
-        Creando la colección nosotros mismos evitamos ese código roto
-        por completo.
+        Seguimos creando la colección a mano (en vez de dejar que el
+        wrapper de langchain la cree) para tener control total y evitar
+        sorpresas si langchain_qdrant cambia su comportamiento interno
+        en el futuro.
         """
         collections = self.client.get_collections()
         exists = any(c.name == self.collection_name for c in collections.collections)
@@ -69,10 +64,10 @@ class QdrantVectorStore:
         try:
             existed = self._ensure_collection()
 
-            vector_store = Qdrant(
+            vector_store = QdrantVectorStore(
                 client=self.client,
                 collection_name=self.collection_name,
-                embeddings=embedding_model,
+                embedding=embedding_model,  # 👈 ojo: singular, no "embeddings"
             )
             vector_store.add_documents(documents)
 
@@ -89,10 +84,10 @@ class QdrantVectorStore:
 
     def as_retriever(self, embedding_model, search_kwargs: Optional[dict] = None):
         """Retriever para búsqueda semántica"""
-        vector_store = Qdrant(
+        vector_store = QdrantVectorStore(
             client=self.client,
             collection_name=self.collection_name,
-            embeddings=embedding_model,
+            embedding=embedding_model,  # 👈 ojo: singular, no "embeddings"
         )
         default_kwargs = {"k": 4, "score_threshold": 0.7}
         if search_kwargs:
