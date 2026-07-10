@@ -1,3 +1,4 @@
+# embedding_provider.py - Versión solo Jina
 import logging
 import os
 from typing import Any, List
@@ -13,21 +14,22 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingProvider:
-    """Proveedor de embeddings con Jina AI v3"""
+    """Proveedor de embeddings con Jina AI v3 (sin fallback a HuggingFace)"""
 
     def __init__(self) -> None:
         self._model: Any = None
         self._fallback_model: FakeEmbeddings | None = None
-        # Jina v3 usa 1024 dimensiones
         self._embedding_size = 1024
 
     def get_model(self) -> Any:
         if self._model is None:
             try:
-                logger.info("Inicializando Jina Embeddings v3")
+                logger.info("🚀 Inicializando Jina Embeddings v3")
                 self._model = JinaEmbeddings()
+                logger.info("✅ Jina Embeddings listo")
             except Exception as exc:
-                logger.warning("No se pudo cargar Jina embeddings: %s", exc, exc_info=True)
+                logger.error("❌ No se pudo cargar Jina embeddings: %s", exc, exc_info=True)
+                logger.warning("⚠️ Usando FakeEmbeddings como fallback")
                 self._model = self.get_fallback_model()
         return self._model
 
@@ -37,7 +39,6 @@ class EmbeddingProvider:
         return self._fallback_model
 
     def _apply_prefix(self, text: str, is_query: bool) -> str:
-        """Prefijos para mejorar búsqueda"""
         prefix = "search_query:" if is_query else "search_document:"
         return f"{prefix}{text}"
 
