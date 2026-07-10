@@ -295,50 +295,28 @@ async def error_handler(
 # MAIN
 # =====================================================
 
-def run_bot():
+async def run_bot():
 
     if not BOT_TOKEN:
-
-        print(
-            "❌ TELEGRAM_BOT_TOKEN no configurado"
-        )
-
+        print("TELEGRAM_BOT_TOKEN no configurado")
         return
 
-    print("🤖 Iniciando bot Telegram...")
+    print("Iniciando bot Telegram...")
 
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_error_handler(error_handler)
 
-    application.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(drop_pending_updates=True)
 
-    application.add_handler(
-        CallbackQueryHandler(
-            button_handler
-        )
-    )
-
-    application.add_error_handler(
-        error_handler
-    )
-
-    print("✅ Bot iniciado correctamente")
-
-    application.run_polling(
-        drop_pending_updates=True
-    )
+    print("Bot Telegram iniciado correctamente")
+    await asyncio.Event().wait()
 
 # =====================================================
 # ENTRYPOINT
 # =====================================================
-
 if __name__ == "__main__":
-    run_bot()
+    asyncio.run(run_bot())

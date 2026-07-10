@@ -38,6 +38,6 @@ async def lifespan(app: FastAPI):
 
 def _start_bot() -> None:
     try:
-        run_bot()
+        asyncio.run(run_bot())
     except Exception as e:
         print(f"⚠️ Telegram no disponible: {e}")
