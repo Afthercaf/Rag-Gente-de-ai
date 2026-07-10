@@ -1,11 +1,11 @@
 # Backend & Framework
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
-python-dotenv==1.0.0
-requests==2.31.0
-urllib3==2.1.0
-httpx==0.25.1
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+pydantic==2.11.7
+python-dotenv==1.1.1
+requests==2.32.4
+urllib3==2.5.0
+httpx==0.28.1
 
 # IA & RAG
 langchain==0.3.27
@@ -14,17 +14,17 @@ langchain-community==0.3.31
 langchain-text-splitters==0.3.9
 langchain-groq==0.2.0
 
-chromadb==0.4.17
-pdfplumber==0.10.3
+chromadb==0.5.23
+pdfplumber==0.11.7
 
 # Pagos
 mercadopago==2.3.0
 
 # Telegram
-python-telegram-bot==20.4
+python-telegram-bot==22.3
 
 # Database
-supabase==2.3.5
+supabase==2.15.3
 
 # Utilities
-aiofiles==23.2.1
+aiofiles==24.1.0
