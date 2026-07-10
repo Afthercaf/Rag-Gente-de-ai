@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from langchain_community.vectorstores import Qdrant
 from qdrant_client import QdrantClient
+from qdrant_client.http import models as qmodels
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +13,14 @@ logger = logging.getLogger(__name__)
 class QdrantVectorStore:
     """Conexión a Qdrant Cloud"""
 
-    def __init__(self, collection_name: str = "pizzeria_docs"):
+    def __init__(self, collection_name: str = "pizzeria_docs", vector_size: int = 1024):
         self.url = os.getenv("QDRANT_URL")
         self.api_key = os.getenv("QDRANT_API_KEY")
         self.collection_name = collection_name
+        # Jina Embeddings v3 devuelve vectores de 1024 dimensiones
+        # (ver EmbeddingProvider._embedding_size). Si cambiás de modelo
+        # de embeddings, actualizá este valor.
+        self.vector_size = vector_size
 
         if not self.url or not self.api_key:
             raise ValueError("QDRANT_URL y QDRANT_API_KEY son requeridas")
@@ -27,37 +32,56 @@ class QdrantVectorStore:
             timeout=60,
         )
 
-    def from_documents(self, documents, embedding_model):
-        """Crea o actualiza la colección"""
-        try:
-            # Verificar si la colección existe
-            collections = self.client.get_collections()
-            exists = any(c.name == self.collection_name for c in collections.collections)
+    def _ensure_collection(self) -> bool:
+        """
+        Crea la colección manualmente si no existe, usando el cliente
+        low-level de qdrant (client.create_collection).
 
-            # 🔥 FIX: No pasar force_recreate para evitar init_from
-            if exists:
-                # Si existe, usarla sin recrear
-                vector_store = Qdrant(
-                    client=self.client,
-                    collection_name=self.collection_name,
-                    embeddings=embedding_model,
-                )
-                # Agregar documentos a la colección existente
-                vector_store.add_documents(documents)
+        🔥 FIX: NO usamos Qdrant.from_documents() para crear la colección.
+        Ese wrapper de langchain_community arma internamente un argumento
+        `init_from` y se lo pasa siempre a client.recreate_collection(),
+        sin importar el valor de `force_recreate` que le pases. Las
+        versiones recientes de qdrant-client ya no aceptan ese argumento
+        y el proceso muere con:
+            AssertionError: Unknown arguments: ['init_from']
+        Creando la colección nosotros mismos evitamos ese código roto
+        por completo.
+        """
+        collections = self.client.get_collections()
+        exists = any(c.name == self.collection_name for c in collections.collections)
+
+        if not exists:
+            logger.info(
+                f"Creando colección '{self.collection_name}' ({self.vector_size} dims, cosine)"
+            )
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=qmodels.VectorParams(
+                    size=self.vector_size,
+                    distance=qmodels.Distance.COSINE,
+                ),
+            )
+
+        return exists
+
+    def from_documents(self, documents, embedding_model):
+        """Crea la colección si hace falta y agrega documentos."""
+        try:
+            existed = self._ensure_collection()
+
+            vector_store = Qdrant(
+                client=self.client,
+                collection_name=self.collection_name,
+                embeddings=embedding_model,
+            )
+            vector_store.add_documents(documents)
+
+            if existed:
                 logger.info(f"✅ Documentos agregados a colección existente: {self.collection_name}")
-                return vector_store
             else:
-                # Si no existe, crearla
-                vector_store = Qdrant.from_documents(
-                    documents=documents,
-                    embedding=embedding_model,
-                    url=self.url,
-                    api_key=self.api_key,
-                    collection_name=self.collection_name,
-                    force_recreate=False,  # 🔥 No recrear si existe
-                )
-                logger.info(f"✅ Colección creada: {self.collection_name}")
-                return vector_store
+                logger.info(f"✅ Colección creada y documentos agregados: {self.collection_name}")
+
+            return vector_store
 
         except Exception as exc:
             logger.error(f"❌ Error en Qdrant: {exc}", exc_info=True)
