@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from qdrant_db import QdrantVectorStore
+from .qdrant_db import QdrantVectorStore  # <-- CAMBIO AQUÍ
 
 logger = logging.getLogger(__name__)
 
