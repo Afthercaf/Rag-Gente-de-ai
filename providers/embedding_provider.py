@@ -3,100 +3,57 @@ import os
 from typing import Any, List
 
 from dotenv import load_dotenv
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.embeddings import FakeEmbeddings
 
-load_dotenv()
+from providers.jina_embeddings import JinaEmbeddings
 
-from config.models import EMBED_MODEL as REMOTE_EMBED_MODEL
-from config.models_local import EMBED_MODEL_LOCAL
-from providers.huggingface_embeddings import HuggingFaceEmbeddings
-from utils.constants import (
-    HF_EMBEDDING_MODEL,
-    OLLAMA_BASE_URL,
-    USE_HUGGINGFACE_EMBEDDINGS,
-    USE_LOCAL,
-)
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingProvider:
-    """Proveedor de embeddings compatible con Chroma, Ollama y HuggingFace."""
+    """Proveedor de embeddings con Jina AI v3"""
 
     def __init__(self) -> None:
         self._model: Any = None
         self._fallback_model: FakeEmbeddings | None = None
-        self._model_name = (
-            os.getenv("EMBED_MODEL_LOCAL", EMBED_MODEL_LOCAL)
-            if USE_LOCAL
-            else os.getenv("EMBED_MODEL", REMOTE_EMBED_MODEL)
-        )
-        self._use_huggingface = USE_HUGGINGFACE_EMBEDDINGS
-        self._hf_model_name = os.getenv("HF_EMBEDDING_MODEL", HF_EMBEDDING_MODEL)
-        self._base_url = os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
+        # Jina v3 usa 1024 dimensiones
+        self._embedding_size = 1024
 
     def get_model(self) -> Any:
         if self._model is None:
-            if self._use_huggingface:
-                logger.info("Usando proveedor de embeddings HuggingFace: %s", self._hf_model_name)
-                try:
-                    self._model = HuggingFaceEmbeddings(model_name=self._hf_model_name)
-                except Exception as exc:
-                    logger.warning("No se pudo cargar embeddings HuggingFace: %s", exc, exc_info=True)
-                    self._model = self.get_fallback_model()
-            else:
-                logger.info("Usando proveedor de embeddings Ollama: %s", self._model_name)
-                try:
-                    self._model = OllamaEmbeddings(model=self._model_name, base_url=self._base_url)
-                except Exception as exc:
-                    logger.warning("No se pudo cargar embeddings Ollama: %s", exc, exc_info=True)
-                    if USE_HUGGINGFACE_EMBEDDINGS:
-                        logger.warning("Intentando fallback a HuggingFace embeddings: %s", self._hf_model_name)
-                        try:
-                            self._model = HuggingFaceEmbeddings(model_name=self._hf_model_name)
-                        except Exception as inner_exc:
-                            logger.warning(
-                                "No se pudo cargar embeddings HuggingFace en fallback: %s",
-                                inner_exc,
-                                exc_info=True,
-                            )
-                            self._model = self.get_fallback_model()
-                    else:
-                        self._model = self.get_fallback_model()
+            try:
+                logger.info("Inicializando Jina Embeddings v3")
+                self._model = JinaEmbeddings()
+            except Exception as exc:
+                logger.warning("No se pudo cargar Jina embeddings: %s", exc, exc_info=True)
+                self._model = self.get_fallback_model()
         return self._model
 
     def get_fallback_model(self) -> FakeEmbeddings:
         if self._fallback_model is None:
-            self._fallback_model = FakeEmbeddings(size=384)
+            self._fallback_model = FakeEmbeddings(size=self._embedding_size)
         return self._fallback_model
 
-    def _encode(self, texts: List[str]) -> List[List[float]]:
-        model = self.get_model()
-        if hasattr(model, "embed_documents"):
-            return [list(map(float, vector)) for vector in model.embed_documents(texts)]
-        if hasattr(model, "embed_query"):
-            return [list(map(float, model.embed_query(text))) for text in texts]
-        if hasattr(model, "encode"):
-            vectors = model.encode(texts, normalize_embeddings=True)
-            return [list(map(float, vector)) for vector in vectors]
-        raise NotImplementedError("El modelo de embeddings no soporta codificación")
+    def _apply_prefix(self, text: str, is_query: bool) -> str:
+        """Prefijos para mejorar búsqueda"""
+        prefix = "search_query:" if is_query else "search_document:"
+        return f"{prefix}{text}"
 
     def embed(self, text: str, **kwargs: Any) -> List[float]:
         try:
-            return self._encode([self._apply_prefix(text, is_query=True)])[0]
+            model = self.get_model()
+            return model.embed_query(self._apply_prefix(text, is_query=True))
         except Exception as exc:
-            logger.warning("El embedding falló; usando fallback sintético: %s", exc, exc_info=True)
-            return self.get_fallback_model().embed_query(self._apply_prefix(text, is_query=True))
+            logger.warning("Embedding falló; usando fallback: %s", exc)
+            return self.get_fallback_model().embed_query(text)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         try:
-            return self._encode([self._apply_prefix(text, is_query=False) for text in texts])
+            model = self.get_model()
+            prefixed = [self._apply_prefix(t, is_query=False) for t in texts]
+            return model.embed_documents(prefixed)
         except Exception as exc:
-            logger.warning("La generación de embeddings falló; usando fallback sintético: %s", exc, exc_info=True)
-            prefixed = [self._apply_prefix(text, is_query=False) for text in texts]
-            return self.get_fallback_model().embed_documents(prefixed)
-
-    def _apply_prefix(self, text: str, is_query: bool) -> str:
-        prefix = "search_query:" if is_query else "search_document:"
-        return f"{prefix}{text}"
+            logger.warning("Embedding documents falló; usando fallback: %s", exc)
+            return self.get_fallback_model().embed_documents(texts)

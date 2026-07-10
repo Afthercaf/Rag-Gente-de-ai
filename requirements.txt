@@ -32,3 +32,9 @@ supabase==2.15.3
 
 # Utilities
 aiofiles==24.1.0
+
+# ============================================================
+# NUEVAS DEPENDENCIAS - Jina Embeddings + Qdrant
+# ============================================================
+qdrant-client>=1.13.0,<2.0
+backoff>=2.2.0,<3.0
