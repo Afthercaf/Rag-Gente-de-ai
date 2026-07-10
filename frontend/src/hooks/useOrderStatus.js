@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 
 const API_BASE =
-  import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+  import.meta.env.VITE_API_URL;
 
 const POLL_INTERVAL = 5000;
 
