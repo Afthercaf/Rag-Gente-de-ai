@@ -26,7 +26,7 @@ USE_HUGGINGFACE_EMBEDDINGS = os.getenv("USE_HUGGINGFACE_EMBEDDINGS", "False").lo
 HF_EMBEDDING_MODEL = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 CACHE_TTL = 3600  # 1 hora
 
-ALLOWED_ORIGINS = [
+LOCAL_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:4173",
     "http://127.0.0.1:5173",
@@ -36,6 +36,12 @@ ALLOWED_ORIGINS = [
     "https://localhost:5173",
     "https://localhost:5173"
 ]
+
+ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+] + LOCAL_ORIGINS
 
 IS_WINDOWS = sys.platform == "win32"
 

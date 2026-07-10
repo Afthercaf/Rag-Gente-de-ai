@@ -8,8 +8,22 @@ services:
       python -m pip install --upgrade pip
       pip install -r requirements.txt
 
-    startCommand: uvicorn api2a:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn api2:app --host 0.0.0.0 --port $PORT
 
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.11"
+  - type: web
+    name: rag-gente-de-ai
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://ai-backend-gu75.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
