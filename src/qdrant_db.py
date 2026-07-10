@@ -1,3 +1,4 @@
+# src/qdrant_db.py
 import logging
 import os
 from typing import List, Optional
@@ -33,16 +34,31 @@ class QdrantVectorStore:
             collections = self.client.get_collections()
             exists = any(c.name == self.collection_name for c in collections.collections)
 
-            vector_store = Qdrant.from_documents(
-                documents=documents,
-                embedding=embedding_model,
-                url=self.url,
-                api_key=self.api_key,
-                collection_name=self.collection_name,
-                force_recreate=not exists,  # Solo crear si no existe
-            )
-            logger.info(f"✅ Vector store listo en colección: {self.collection_name}")
-            return vector_store
+            # 🔥 FIX: No pasar force_recreate para evitar init_from
+            if exists:
+                # Si existe, usarla sin recrear
+                vector_store = Qdrant(
+                    client=self.client,
+                    collection_name=self.collection_name,
+                    embeddings=embedding_model,
+                )
+                # Agregar documentos a la colección existente
+                vector_store.add_documents(documents)
+                logger.info(f"✅ Documentos agregados a colección existente: {self.collection_name}")
+                return vector_store
+            else:
+                # Si no existe, crearla
+                vector_store = Qdrant.from_documents(
+                    documents=documents,
+                    embedding=embedding_model,
+                    url=self.url,
+                    api_key=self.api_key,
+                    collection_name=self.collection_name,
+                    force_recreate=False,  # 🔥 No recrear si existe
+                )
+                logger.info(f"✅ Colección creada: {self.collection_name}")
+                return vector_store
+
         except Exception as exc:
             logger.error(f"❌ Error en Qdrant: {exc}", exc_info=True)
             raise
@@ -60,7 +76,7 @@ class QdrantVectorStore:
         return vector_store.as_retriever(search_kwargs=default_kwargs)
 
     def delete_collection(self):
-        """Elimina la colección (útil para limpieza)"""
+        """Elimina la colección"""
         try:
             self.client.delete_collection(self.collection_name)
             logger.info(f"🗑️ Colección {self.collection_name} eliminada")
