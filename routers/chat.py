@@ -41,7 +41,15 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @measure_time
 async def chat(req: ChatRequest):
     """Chat con memoria por usuario + RAG contextual."""
+    print("\n" + "=" * 60)
+    print(f"🚀 [CHAT] Nueva solicitud recibida")
+    print(f"📝 [CHAT] user_id: {req.user_id}")
+    print(f"📝 [CHAT] message: '{req.message}'")
+    print(f"📝 [CHAT] use_cache: {req.use_cache}")
+    print("=" * 60)
+
     if not state["ready"]:
+        print("⏳ [CHAT] Sistema NO listo - inicializando...")
         return JSONResponse(content={
             "reply": "⏳ Sistema inicializando... Por favor espera unos segundos.",
             "is_order": False,
@@ -49,10 +57,11 @@ async def chat(req: ChatRequest):
 
     query = req.message.strip()
     if not query:
+        print("⚠️ [CHAT] Mensaje vacío")
         return JSONResponse(content={"reply": ""})
 
     session = get_user_session(req.user_id)
-    print(f"👤 Usuario: {req.user_id} | 🧠 Historial: {len(session['history'])} msgs")
+    print(f"👤 [CHAT] Usuario: {req.user_id} | 🧠 Historial: {len(session['history'])} msgs")
 
     # ── Pizzas del RAG + ¿hay un flujo de pedido activo? ──────────
     # Se necesita saber esto ANTES de consultar la caché (ver más
@@ -62,8 +71,11 @@ async def chat(req: ChatRequest):
     # sigue cubriendo el try/except de abajo.
     try:
         pizza_names = rag_service.get_pizza_names()
-    except Exception:
+        print(f"🍕 [CHAT] Pizzas del RAG: {pizza_names}")
+    except Exception as e:
+        print(f"⚠️ [CHAT] Error obteniendo pizza_names: {e}")
         pizza_names = []
+    
     flow_active = is_order_flow_active(session["history"], pizza_names)
 
     # Cache
@@ -82,34 +94,45 @@ async def chat(req: ChatRequest):
         cache_key = get_cache_key(f"{req.user_id}:{query}")
         cached = response_cache.get(cache_key)
         if cached:
-            print("📦 Respuesta desde caché")
+            print(f"📦 [CHAT] Respuesta desde caché")
+            print(f"📦 [CHAT] Contenido: {cached.get('reply', '')[:100]}...")
             return JSONResponse(content=cached)
 
     try:
         # ✅ Nombres dinámicos desde RAG (ya obtenidos arriba)
         is_new_order = is_new_order_query(query, pizza_names)
-        print(f"🍕 Pizzas detectadas del RAG: {pizza_names}")
-        print(f"🆕 Es nuevo pedido: {is_new_order}")
+        print(f"🆕 [CHAT] ¿Es nuevo pedido? {is_new_order}")
 
         history_text = "" if is_new_order else build_history_text(session)
         search_query = query
-        print(f"🔍 Búsqueda RAG: {search_query}")
+        print(f"🔍 [CHAT] Búsqueda RAG: {search_query}")
 
         rag_context = await rag_service.retrieve_context(search_query)
         promos_text = rag_service.get_promos_text()
         full_context = rag_service.build_full_context(rag_context, promos_text)
+        print(f"📚 [CHAT] Contexto RAG: {len(full_context)} caracteres")
 
+        print("\n🤖 [CHAT] Llamando a llm_service.generate_response()...")
         content = await llm_service.generate_response(
             context=full_context,
             history_text=history_text,
             question=query,
             history=session["history"],
         )
+        print(f"📥 [CHAT] Respuesta del LLM recibida")
+        print(f"📥 [CHAT] Longitud: {len(content)}")
+        print(f"📥 [CHAT] ¿Está vacía? {not content.strip()}")
+        print(f"📥 [CHAT] Primeros 300 caracteres:\n{content[:300] if content else '--- VACÍO ---'}")
+        print("-" * 60)
 
         if req.save_history:
             append_to_history(session, req.user_id, query, content)
+            print(f"💾 [CHAT] Historial guardado")
 
         is_order, order_details = llm_service.extract_order_details(content)
+        print(f"📋 [CHAT] ¿Es orden? {is_order}")
+        if order_details:
+            print(f"📋 [CHAT] Detalles de orden: {order_details}")
 
         result = {
             "reply": content,
@@ -120,12 +143,18 @@ async def chat(req: ChatRequest):
 
         if req.use_cache and cache_key is not None:
             response_cache.set(cache_key, result)
+            print(f"💾 [CHAT] Guardado en caché")
+
+        print(f"📤 [CHAT] Respuesta final:")
+        print(f"📤 [CHAT] reply: {result['reply'][:200] if result['reply'] else '--- VACÍO ---'}")
+        print(f"📤 [CHAT] is_order: {result['is_order']}")
+        print("=" * 60 + "\n")
 
         return JSONResponse(content=result)
 
     except Exception as e:
         import traceback
-        print(f"❌ Error en /chat: {e}")
+        print(f"❌ [CHAT] Error en /chat: {e}")
         traceback.print_exc()
         return JSONResponse(
             status_code=500,

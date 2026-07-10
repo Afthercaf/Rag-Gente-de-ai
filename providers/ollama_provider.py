@@ -14,7 +14,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_URL = "http://killerexpert10.tail29c8ce.ts.net:11434"
 DEFAULT_RETRY_COUNT = 3
 RETRY_BACKOFF_SECONDS = 0.5
 

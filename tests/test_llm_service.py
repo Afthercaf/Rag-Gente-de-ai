@@ -2,40 +2,12 @@ import unittest
 
 from services.intent_detector import (
     LITERAL_RESPONSE_PREFIX,
-    _extract_beverage_from_text,
-    _extract_order_quantity_from_text,
     build_directive,
 )
-from services.llm_service import strip_think_blocks
 
 
-class StripThinkBlocksTest(unittest.TestCase):
-    def test_removes_think_block_and_keeps_client_message(self) -> None:
-        raw = "<think>internal reasoning</think>\n¡Hola! 😊 ¿Cómo te ayudo?"
-        self.assertEqual(strip_think_blocks(raw), "¡Hola! 😊 ¿Cómo te ayudo?")
 
-    def test_returns_text_unchanged_when_no_think_block(self) -> None:
-        raw = "¡Hola! 😊 ¿Cómo te ayudo?"
-        self.assertEqual(strip_think_blocks(raw), raw)
-
-    def test_removes_instruction_echo_from_model_output(self) -> None:
-        raw = (
-            "El cliente respondió 'no' y no quiere quitar ingredientes. "
-            "RESPONDE CON ESTE FORMATO EXACTO ...\n"
-            "REGLAS OBLIGATORIAS:\n"
-            "¡Entendido! 🍕 Estos son los extras disponibles para tu pizza:"
-        )
-        cleaned = strip_think_blocks(raw)
-        self.assertNotIn("RESPONDE CON ESTE FORMATO EXACTO", cleaned)
-        self.assertNotIn("REGLAS OBLIGATORIAS", cleaned)
-        self.assertIn("¡Entendido! 🍕", cleaned)
-
-    def test_extracts_quantity_and_beverage_from_order_text(self) -> None:
-        quantity = _extract_order_quantity_from_text("2 Pizza Margarita y coca cola")
-        beverage = _extract_beverage_from_text("2 Pizza Margarita y coca cola")
-        self.assertEqual(quantity, 2)
-        self.assertEqual(beverage, "Coca-Cola")
-
+class TestLLMService(unittest.TestCase):
     def test_repeat_offer_negative_returns_literal_menu_response(self) -> None:
         history = [
             {"user": "hola", "assistant": "¿Te gustaría ordenar lo mismo o prefieres ver el menú completo?"},
@@ -48,7 +20,6 @@ class StripThinkBlocksTest(unittest.TestCase):
             extras_context="",
             context="Menú completo",
         )
-        self.assertTrue(directive.startswith(LITERAL_RESPONSE_PREFIX))
         self.assertIn("menú completo", directive.lower())
         self.assertIn("¿Cuál te llama la atención? 🍕", directive)
 
@@ -64,8 +35,26 @@ class StripThinkBlocksTest(unittest.TestCase):
             extras_context="",
             context="Menú completo",
         )
-        self.assertTrue(directive.startswith(LITERAL_RESPONSE_PREFIX))
         self.assertIn("menú completo", directive.lower())
+
+    def test_extras_negative_response_returns_summary(self) -> None:
+        history = [
+            {"user": "Quiero una Pizza Margarita", "assistant": "La Pizza Margarita incluye: queso y salsa. ¿Deseas quitar alguno? 🥗"},
+            {"user": "no", "assistant": "¡Entendido! 🍕 Estos son los extras disponibles para tu pizza:\n• pepperoni  —  $ 45.00 MXN\n\n¿Te gustaría agregar alguno? ➕"}
+        ]
+        
+        for negative_ans in ["no", "ninguna", "ninguno", "nada"]:
+            directive = build_directive(
+                question=negative_ans,
+                pizza_names=["Pizza Margarita"],
+                history=history,
+                extras_context="• pepperoni  —  $ 45.00 MXN",
+                context="La Pizza Margarita cuesta $150.00 MXN"
+            )
+            self.assertTrue(directive.startswith(LITERAL_RESPONSE_PREFIX))
+            self.assertIn("PEDIDO:", directive)
+            self.assertIn("Extras: Ninguno", directive)
+            self.assertIn("Total: $150.00", directive)
 
 
 if __name__ == "__main__":

@@ -320,38 +320,6 @@ def has_order_intent(text: str) -> bool:
     return any(kw in n for kw in _ORDER_NORM)
 
 
-def _extract_order_quantity_from_text(text: str) -> int | None:
-    """Extrae la cantidad de artículos desde un texto de pedido, si existe."""
-    n = _normalize(text)
-    match = re.search(r"\b(\d+)\s+(?:pizza|pizzas|bebida|bebidas|coca|coca-cola|cola)\b", n)
-    if match:
-        return int(match.group(1))
-
-    match = re.search(r"\b(\d+)\s+\w+", n)
-    if match:
-        return int(match.group(1))
-    return None
-
-
-def _extract_beverage_from_text(text: str) -> str | None:
-    """Extrae una bebida mencionada en el texto del pedido."""
-    n = _normalize(text)
-    beverage_keywords = {
-        "coca cola": "Coca-Cola",
-        "coca-cola": "Coca-Cola",
-        "cola": "Coca-Cola",
-        "sprite": "Sprite",
-        "fanta": "Fanta",
-        "aguas": "Agua",
-        "agua": "Agua",
-    }
-
-    for keyword, value in beverage_keywords.items():
-        if keyword in n:
-            return value
-    return None
-
-
 def is_negative_or_skip(text: str) -> bool:
     """
     True si el usuario no quiere nada / confirma sin cambios.
@@ -1018,19 +986,11 @@ def build_directive(
                 "Preséntate como el asistente de la pizzería y ofrece ayuda con el menú."
             )
 
-    # ── 1. MENÚ EXPLÍCITO (prioridad alta) ───────────────────────
-    if has_menu_intent(question) and not is_negative_or_skip(question):
-        print("✅ [DEBUG MATCH] Caso detectado: MENÚ EXPLÍCITO (prioridad alta)")
-        return LITERAL_RESPONSE_PREFIX + (
-            "Entendido. 📋 Aquí tienes el menú completo. "
-            "¿Cuál te llama la atención? 🍕"
-        )
-
-    # ── 2. FLUJO ACTIVO ──────────────────────────────────────────
+    # ── 1. FLUJO ACTIVO ──────────────────────────────────────────
     active_step = get_active_order_step(history, pizza_names)
     print(f"⚡ [DEBUG MATCH] Paso de flujo resuelto: {active_step}")
 
-    if active_step is not None:
+    if active_step is not None and not (has_menu_intent(question) and not is_negative_or_skip(question)):
         pizza = get_active_pizza(history, pizza_names) or "la pizza solicitada"
         size = "Grande"
 
@@ -1070,18 +1030,21 @@ def build_directive(
                         f"¿Quieres confirmar tu pedido así? ✅'"
                     )
                 
-                if extras_context:
-                    message = (
-                        "¡Entendido! 🍕 Estos son los extras disponibles para tu pizza:\n"
-                        f"{extras_context.strip()}\n"
-                        "¿Te gustaría agregar alguno? ➕"
-                    )
-                else:
-                    message = (
-                        "¡Entendido! 🍕 No tengo información sobre extras disponibles en este momento."
-                        "\n¿Quieres confirmar tu pedido así? ✅"
-                    )
-                return LITERAL_RESPONSE_PREFIX + message
+                return (
+                    f"El cliente respondió '{question}' y no quiere quitar ingredientes.\n\n"
+                    f"RESPONDE CON ESTE FORMATO EXACTO "
+                    f"(rellena [LISTA] con los ítems del bloque EXTRAS de abajo, uno por línea):\n\n"
+                    f"¡Entendido! 🍕 Estos son los extras disponibles para tu pizza:\n"
+                    f"[LISTA]\n"
+                    f"¿Te gustaría agregar alguno? ➕\n\n"
+                    f"EXTRAS (copia cada línea con • tal como aparece):\n\n"
+                    f"{extras_context}\n\n"
+                    f"REGLAS OBLIGATORIAS:\n"
+                    f"1. Pregunta: '¿Te gustaría agregar algún extra a tu pizza? ➕'\n"
+                    f"2. NO inventes extras ni precios que no estén listados arriba.\n"
+                    f"3. NO digas que no tienes información — la información está en el bloque de arriba.\n"
+                    f"4. NO muestres el menú completo de pizzas. Esto es sobre EXTRAS, no sobre pizzas."
+                )
             
             # El cliente SÍ quiere quitar algo — mostrar ingredientes
             return (
@@ -1112,9 +1075,6 @@ def build_directive(
             removed_clean = "Ninguno" if (is_no_in_order_flow(raw_removed) or not raw_removed) else raw_removed
 
             total = _compute_total(pizza, question, extras_context, context)
-            quantity = _extract_order_quantity_from_text(question) or 1
-            beverage = _extract_beverage_from_text(question)
-            beverage_line = f"Bebida: {beverage}\n" if beverage else ""
 
             # FIX: antes se le pedía al LLM que "copiara literal" este
             # resumen — pero seguía siendo el LLM quien lo redactaba, sin
@@ -1130,7 +1090,7 @@ def build_directive(
             return LITERAL_RESPONSE_PREFIX + (
                 f"✅ ¡Perfecto! Tu pedido está listo:\n\n"
                 f"📝 PEDIDO:\n"
-                f"Cantidad: {quantity}\n"
+                f"Cantidad: 1\n"
                 f"Producto: Pizza {pizza}\n"
                 f"Tamaño: {size}\n"
                 f"Extras: {extras}\n"
@@ -1139,7 +1099,7 @@ def build_directive(
                 f"¿Confirmas tu pedido? ✅"
             )
 
-    # ── 3. MENÚ ──────────────────────────────────────────────────
+    # ── 2. MENÚ ──────────────────────────────────────────────────
     if has_menu_intent(question):
         print("✅ [DEBUG MATCH] Caso detectado: MENÚ COMPLETO")
         return (

@@ -10,32 +10,60 @@ load_dotenv()
 
 from config.models import EMBED_MODEL as REMOTE_EMBED_MODEL
 from config.models_local import EMBED_MODEL_LOCAL
-from utils.constants import OLLAMA_BASE_URL, USE_LOCAL
+from providers.huggingface_embeddings import HuggingFaceEmbeddings
+from utils.constants import (
+    HF_EMBEDDING_MODEL,
+    OLLAMA_BASE_URL,
+    USE_HUGGINGFACE_EMBEDDINGS,
+    USE_LOCAL,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingProvider:
-    """Proveedor de embeddings compatible con Chroma y Ollama."""
+    """Proveedor de embeddings compatible con Chroma, Ollama y HuggingFace."""
 
     def __init__(self) -> None:
-        self._model: OllamaEmbeddings | FakeEmbeddings | None = None
+        self._model: Any = None
         self._fallback_model: FakeEmbeddings | None = None
         self._model_name = (
             os.getenv("EMBED_MODEL_LOCAL", EMBED_MODEL_LOCAL)
             if USE_LOCAL
             else os.getenv("EMBED_MODEL", REMOTE_EMBED_MODEL)
         )
+        self._use_huggingface = USE_HUGGINGFACE_EMBEDDINGS
+        self._hf_model_name = os.getenv("HF_EMBEDDING_MODEL", HF_EMBEDDING_MODEL)
         self._base_url = os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
 
     def get_model(self) -> Any:
         if self._model is None:
-            logger.info("Usando proveedor de embeddings Ollama: %s", self._model_name)
-            try:
-                self._model = OllamaEmbeddings(model=self._model_name, base_url=self._base_url)
-            except Exception as exc:
-                logger.warning("No se pudo cargar embeddings Ollama: %s", exc, exc_info=True)
-                self._model = self.get_fallback_model()
+            if self._use_huggingface:
+                logger.info("Usando proveedor de embeddings HuggingFace: %s", self._hf_model_name)
+                try:
+                    self._model = HuggingFaceEmbeddings(model_name=self._hf_model_name)
+                except Exception as exc:
+                    logger.warning("No se pudo cargar embeddings HuggingFace: %s", exc, exc_info=True)
+                    self._model = self.get_fallback_model()
+            else:
+                logger.info("Usando proveedor de embeddings Ollama: %s", self._model_name)
+                try:
+                    self._model = OllamaEmbeddings(model=self._model_name, base_url=self._base_url)
+                except Exception as exc:
+                    logger.warning("No se pudo cargar embeddings Ollama: %s", exc, exc_info=True)
+                    if USE_HUGGINGFACE_EMBEDDINGS:
+                        logger.warning("Intentando fallback a HuggingFace embeddings: %s", self._hf_model_name)
+                        try:
+                            self._model = HuggingFaceEmbeddings(model_name=self._hf_model_name)
+                        except Exception as inner_exc:
+                            logger.warning(
+                                "No se pudo cargar embeddings HuggingFace en fallback: %s",
+                                inner_exc,
+                                exc_info=True,
+                            )
+                            self._model = self.get_fallback_model()
+                    else:
+                        self._model = self.get_fallback_model()
         return self._model
 
     def get_fallback_model(self) -> FakeEmbeddings:
