@@ -20,7 +20,7 @@ from telegram.ext import (
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_BASE = os.getenv("API_BASE_URL")
+API_BASE = os.getenv("API_BASE_URL", "https://ai-backend-gu75.onrender.com")
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
