@@ -6,7 +6,6 @@ class RegisterRequest(BaseModel):
     telefono: str
     gmail: str
     direccion: str
-    role: str = "cliente"
     password: str
 
 

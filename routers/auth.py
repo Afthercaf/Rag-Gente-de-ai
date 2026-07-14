@@ -13,7 +13,6 @@ async def register(req: RegisterRequest):
         telefono=req.telefono,
         gmail=req.gmail,
         direccion=req.direccion,
-        role=req.role,
         password=req.password,
     )
 

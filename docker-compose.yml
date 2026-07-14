@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    container_name: fastapi_backend
+
+    # Comparte la red del contenedor tailscale
+    # Así el backend es accesible en: http://pizzeria-backend.tail29c8ce.ts.net:8000
+    network_mode: "service:tailscale"
+
+    depends_on:
+      - tailscale
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - .:/app
+
+    command: >
+      uvicorn api2:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: pizzeria-backend
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      # - TS_EXTRA_ARGS=--advertise-tags=tag:container
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+
+volumes:
+  tailscale-state:

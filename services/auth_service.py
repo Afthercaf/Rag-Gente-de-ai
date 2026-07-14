@@ -9,7 +9,6 @@ async def register(
     telefono: str,
     gmail: str,
     direccion: str,
-    role: str,
     password: str,
 ) -> Dict[str, Any]:
     gmail = gmail.strip().lower()
@@ -24,7 +23,7 @@ async def register(
         telefono=telefono,
         gmail=gmail,
         direccion=direccion,
-        role=role,
+        role="cliente",
         password_hash=password,
     )
 

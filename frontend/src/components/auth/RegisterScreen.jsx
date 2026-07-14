@@ -10,7 +10,7 @@ import { AuthShell, Field, Row, AuthBtn, AuthSwitch, ErrorMsg } from "./AuthComm
 export default function RegisterScreen({ onLogin, onGo }) {
   const [form, setForm] = useState({
     nombre: "", telefono: "", gmail: "",
-    direccion: "", role: "cliente",
+    direccion: "",
     password: "", confirm: "",
   });
   const [error,   setError]   = useState("");
@@ -50,15 +50,6 @@ export default function RegisterScreen({ onLogin, onGo }) {
       </Row>
       <Field label="Correo Gmail" type="email" value={form.gmail}    onChange={set("gmail")}    placeholder="usuario@gmail.com" />
       <Field label="Dirección"                 value={form.direccion} onChange={set("direccion")} placeholder="Calle, Número, Colonia" />
-
-      <div style={s.fieldWrap}>
-        <label style={s.fieldLabel}>Rol</label>
-        <select value={form.role} onChange={(e) => set("role")(e.target.value)} style={s.select}>
-          <option value="cliente">Cliente</option>
-          <option value="admin">Administrador</option>
-          <option value="repartidor">Repartidor</option>
-        </select>
-      </div>
 
       <Row>
         <Field label="Contraseña"           type="password" value={form.password} onChange={set("password")} placeholder="••••••••" />
