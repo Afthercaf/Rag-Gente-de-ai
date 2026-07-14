@@ -1,8 +1,8 @@
 import re
-
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from agents.router import RouterAgent  # 🆕 NUEVA IMPORTACIÓN
 from core.cache import response_cache
 from core.decorators import measure_time
 from core.state import state
@@ -18,6 +18,8 @@ from services.session_service import (
 from src.supabase_chat import delete_chat_history, get_chat_history
 from utils.cache_keys import get_cache_key
 
+# 🆕 Instancia del router multi-agente (creada una sola vez)
+router_agent = RouterAgent()
 
 # ✅ Ahora recibe pizza_names dinámico desde RAG
 def is_new_order_query(query: str, pizza_names: list[str]) -> bool:
@@ -40,7 +42,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("")
 @measure_time
 async def chat(req: ChatRequest):
-    """Chat con memoria por usuario + RAG contextual."""
+    """Chat con arquitectura multi-agente."""
     print("\n" + "=" * 60)
     print(f"🚀 [CHAT] Nueva solicitud recibida")
     print(f"📝 [CHAT] user_id: {req.user_id}")
@@ -64,11 +66,6 @@ async def chat(req: ChatRequest):
     print(f"👤 [CHAT] Usuario: {req.user_id} | 🧠 Historial: {len(session['history'])} msgs")
 
     # ── Pizzas del RAG + ¿hay un flujo de pedido activo? ──────────
-    # Se necesita saber esto ANTES de consultar la caché (ver más
-    # abajo). Si falla la consulta al RAG aquí, no se rompe el
-    # endpoint completo — se asume "sin flujo activo" y se continúa;
-    # cualquier error real durante la generación de la respuesta lo
-    # sigue cubriendo el try/except de abajo.
     try:
         pizza_names = rag_service.get_pizza_names()
         print(f"🍕 [CHAT] Pizzas del RAG: {pizza_names}")
@@ -78,17 +75,7 @@ async def chat(req: ChatRequest):
     
     flow_active = is_order_flow_active(session["history"], pizza_names)
 
-    # Cache
-    # FIX: la caché se indexaba SOLO por "user_id:texto del mensaje",
-    # sin considerar en qué paso del flujo de pedido está el cliente.
-    # Eso hacía que un "no" (o cualquier texto repetido más tarde en la
-    # misma conversación) devolviera, desde caché, la respuesta de OTRO
-    # punto del flujo en vez de avanzar el paso actual de ingredientes/
-    # extras — exactamente el riesgo que ya advertía la documentación
-    # de is_order_flow_active() en intent_detector.py, pero que nunca
-    # se conectó aquí. Mientras el flujo está activo, la respuesta
-    # correcta depende del HISTORIAL completo, no solo del texto del
-    # mensaje — así que se omite la caché por completo en ese caso.
+    # Cache - solo si no hay flujo activo
     cache_key = None
     if req.use_cache and not flow_active:
         cache_key = get_cache_key(f"{req.user_id}:{query}")
@@ -99,55 +86,31 @@ async def chat(req: ChatRequest):
             return JSONResponse(content=cached)
 
     try:
-        # ✅ Nombres dinámicos desde RAG (ya obtenidos arriba)
-        is_new_order = is_new_order_query(query, pizza_names)
-        print(f"🆕 [CHAT] ¿Es nuevo pedido? {is_new_order}")
-
-        history_text = "" if is_new_order else build_history_text(session)
-        search_query = query
-        print(f"🔍 [CHAT] Búsqueda RAG: {search_query}")
-
-        rag_context = await rag_service.retrieve_context(search_query)
-        promos_text = rag_service.get_promos_text()
-        full_context = rag_service.build_full_context(rag_context, promos_text)
-        print(f"📚 [CHAT] Contexto RAG: {len(full_context)} caracteres")
-
-        print("\n🤖 [CHAT] Llamando a llm_service.generate_response()...")
-        content = await llm_service.generate_response(
-            context=full_context,
-            history_text=history_text,
-            question=query,
+        # 🆕 USAR EL ROUTER MULTI-AGENTE
+        print("\n🤖 [CHAT] Delegando al RouterAgent...")
+        result = await router_agent.route(
+            query=query,
             history=session["history"],
+            user_id=req.user_id,
+            use_cache=req.use_cache,
         )
-        print(f"📥 [CHAT] Respuesta del LLM recibida")
-        print(f"📥 [CHAT] Longitud: {len(content)}")
-        print(f"📥 [CHAT] ¿Está vacía? {not content.strip()}")
-        print(f"📥 [CHAT] Primeros 300 caracteres:\n{content[:300] if content else '--- VACÍO ---'}")
-        print("-" * 60)
+        
+        print(f"📥 [CHAT] Respuesta del agente recibida")
+        print(f"📥 [CHAT] Agente: {result.get('agent', 'unknown')}")
+        print(f"📥 [CHAT] Longitud respuesta: {len(result.get('reply', ''))}")
+        print(f"📥 [CHAT] ¿Es orden? {result.get('is_order', False)}")
 
+        # Guardar historial
         if req.save_history:
-            append_to_history(session, req.user_id, query, content)
+            append_to_history(session, req.user_id, query, result["reply"])
             print(f"💾 [CHAT] Historial guardado")
 
-        is_order, order_details = llm_service.extract_order_details(content)
-        print(f"📋 [CHAT] ¿Es orden? {is_order}")
-        if order_details:
-            print(f"📋 [CHAT] Detalles de orden: {order_details}")
-
-        result = {
-            "reply": content,
-            "is_order": is_order,
-            "order_details": order_details,
-            "user_id": req.user_id,
-        }
-
-        if req.use_cache and cache_key is not None:
+        # Guardar en caché si corresponde
+        if req.use_cache and cache_key is not None and not flow_active:
             response_cache.set(cache_key, result)
             print(f"💾 [CHAT] Guardado en caché")
 
-        print(f"📤 [CHAT] Respuesta final:")
-        print(f"📤 [CHAT] reply: {result['reply'][:200] if result['reply'] else '--- VACÍO ---'}")
-        print(f"📤 [CHAT] is_order: {result['is_order']}")
+        print(f"📤 [CHAT] Respuesta final - Agente: {result.get('agent', 'unknown')}")
         print("=" * 60 + "\n")
 
         return JSONResponse(content=result)

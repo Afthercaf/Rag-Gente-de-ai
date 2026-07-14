@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from src.qdrant_db import QdrantVectorStore  # <-- CAMBIO AQUÍ
+from src.qdrant_db import QdrantVectorStoreWrapper  # <-- CORREGIDO: usar el wrapper, no la clase de langchain_qdrant
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def get_vector_store(embedding_model):
 
     if _vector_store is None or _embedding_model != embedding_model:
         _embedding_model = embedding_model
-        _vector_store = QdrantVectorStore(collection_name="pizzeria_docs")
+        _vector_store = QdrantVectorStoreWrapper(collection_name="pizzeria_docs")
         logger.info("Vector store inicializado")
 
     return _vector_store

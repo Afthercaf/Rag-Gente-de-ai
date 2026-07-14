@@ -1,6 +1,8 @@
 import asyncio
 import re
 import logging
+import os
+import time
 from typing import Optional, Dict, List, Set
 
 from core.state import state
@@ -12,15 +14,294 @@ logger = logging.getLogger(__name__)
 _pizza_names_cache: list[str] = []
 _extras_cache: Dict[str, str] = {}  # cache por pizza_name
 
+# ── Referencia estable de precios (para validación anti-alucinación) ──
+_price_reference_cache: Optional[str] = None
 
-async def retrieve_context(search_query: str) -> str:
-    """Busca en ChromaDB y retorna el contexto como texto."""
-    docs = await asyncio.to_thread(
-        state["db"].similarity_search,
+
+# ═══════════════════════════════════════════════════════════════════
+# CONFIGURACIÓN - Para controlar el reranker
+# ═══════════════════════════════════════════════════════════════════
+# Si quieres desactivar el reranker para pruebas más rápidas:
+USE_RERANKER = os.getenv("USE_RERANKER", "1").lower() in {"1", "true", "yes", "on"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DEBUG: volcado a archivo de todo lo que trae el RAG
+# ═══════════════════════════════════════════════════════════════════
+_DEBUG_ENABLED = os.getenv("RAG_DEBUG_LOG", "1").lower() not in {"0", "false", "no"}
+_DEBUG_LOG_PATH = os.getenv("RAG_DEBUG_LOG_PATH", "debug_rag_context.log")
+
+
+def _debug_dump(label: str, query: str, content: str) -> None:
+    """Guarda en disco (append) el contenido recuperado del RAG."""
+    if not _DEBUG_ENABLED:
+        return
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("\n" + "=" * 70 + "\n")
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {label}\n")
+            f.write(f"QUERY: {query!r}\n")
+            f.write("-" * 70 + "\n")
+            f.write(content if content else "(vacío)")
+            f.write("\n")
+    except Exception as e:
+        logger.warning("No se pudo escribir el log de debug RAG: %s", e)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FILTRADO DE RUIDO - Elimina metadatos basura de los documentos RAG
+# ═══════════════════════════════════════════════════════════════════
+
+_NOISE_PATTERNS = [
+    # Códigos/IDs internos
+    r'\bcid:\s*\$\s*\d+',           # "cid: $127 MXN"
+    r'\bclabe:\s*\$\s*\d+',         # "CLABE: $012910..."
+    # Teléfonos formateados como precios
+    r'\bwhatsapp:\s*\$\s*\d+',      # "WhatsApp: $9995466336 MXN"
+    r'\btelefono:\s*\$\s*\d+',      # "Teléfono: $5512345678 MXN"
+    r'\bcelular:\s*\$\s*\d+',       # "Celular: $5512345678 MXN"
+    # Palabras que NO son productos con precio
+    r'\bpizzer[ií]a:\s*\$\s*\d+',   # "Pizzería: $220 MXN"
+    r'\bcalle:\s*\$\s*\d+',         # "calle: $47 MXN"
+    r'\bn[uú]mero:\s*\$\s*\d+',     # "número: $123 MXN"
+    r'\bdirecci[oó]n:\s*\$\s*\d+',  # "dirección: $123 MXN"
+    r'\bcolonia:\s*\$\s*\d+',       # "colonia: $123 MXN"
+    r'\bciudad:\s*\$\s*\d+',        # "ciudad: $123 MXN"
+    r'\bestado:\s*\$\s*\d+',        # "estado: $123 MXN"
+    r'\bc[oó]digo postal:\s*\$\s*\d+',  # "código postal: $123 MXN"
+    r'\bcp:\s*\$\s*\d+',            # "CP: $123 MXN"
+    r'\brfc:\s*\$\s*\d+',           # "RFC: $123 MXN"
+    r'\bcurp:\s*\$\s*\d+',          # "CURP: $123 MXN"
+    # Días de la semana como precios
+    r'\blunes:\s*\$\s*\d+',         # "Lunes: $6 MXN"
+    r'\bmartes:\s*\$\s*\d+',
+    r'\bmi[eé]rcoles:\s*\$\s*\d+',
+    r'\bjueves:\s*\$\s*\d+',
+    r'\bviernes:\s*\$\s*\d+',
+    r'\bs[aá]bado:\s*\$\s*\d+',
+    r'\bdomingo:\s*\$\s*\d+',
+    # Horarios
+    r'\bhorario:\s*\$\s*\d+',
+    r'\bapertura:\s*\$\s*\d+',
+    r'\bcierre:\s*\$\s*\d+',
+    # Frases genéricas
+    r'\brespuestas? est[aá]n basadas en el men[uú]',  # "respuestas están basadas en el menú..."
+    r'\bmen[uú] permanente de pizzer[ií]a',
+    r'\b[úu]til para que el asistente',
+    r'\binformaci[oó]n est[aá]tica para',
+    r'\bingesta RAG',
+    r'\bdocumento est[aá]tico',
+    # Precios imposibles para pizzas (> $1000 o < $10)
+    r'\$\s*(\d{4,})\s*MXN',         # $1000+ MXN
+    r'\$\s*([1-9])\s*MXN',          # $1-9 MXN
+]
+
+_NOISE_REGEX = re.compile('|'.join(_NOISE_PATTERNS), re.IGNORECASE)
+
+# Nombres válidos de pizzas para validar precios
+_VALID_PIZZA_KEYWORDS = {
+    'margarita', 'pepperoni', 'hawaiana', 'cuatro quesos', 'cuatroquesos',
+    'vegetariana', 'barbacoa', 'carbonara', 'mexicana', 'napolitana',
+    'prosciutto', 'funghi', 'diavola', 'capricciosa', 'tonno', 'parma',
+    'campirana', 'pastorera', 'especial', 'deluxe', 'suprema', 'hawaiano',
+}
+
+def _filter_noise_lines(text: str) -> str:
+    """
+    Elimina líneas que contienen metadatos basura disfrazados de precios.
+    Conserva solo líneas que parecen menú real (pizza + precio razonable).
+    """
+    if not text:
+        return text
+    
+    lines = text.split('\n')
+    clean_lines = []
+    
+    for line in lines:
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        
+        # Si la línea NO tiene precio, mantenerla (puede ser contexto útil)
+        if not re.search(r'\$\s*\d+', line_stripped):
+            clean_lines.append(line)
+            continue
+        
+        # La línea TIENE precio - verificar si es ruido
+        if _NOISE_REGEX.search(line_stripped):
+            continue  # Es ruido, descartar
+        
+        # Verificar si tiene palabras clave de pizza válidas
+        has_pizza_keyword = any(kw in line_stripped.lower() for kw in _VALID_PIZZA_KEYWORDS)
+        
+        # También aceptar líneas con formato típico de menú: "• Nombre: $XXX"
+        is_menu_format = bool(re.search(r'[•\-*]\s*[A-Za-zÁ-Úá-úñ]+\s*[:\-]?\s*\$\s*\d+', line_stripped))
+        
+        if has_pizza_keyword or is_menu_format:
+            clean_lines.append(line)
+        else:
+            # Línea con precio pero sin palabras clave de pizza - posible ruido
+            # Solo mantener si el precio está en rango razonable para pizza ($50-$500)
+            price_match = re.search(r'\$\s*(\d+(?:[.,]\d{1,2})?)', line_stripped)
+            if price_match:
+                try:
+                    price = float(price_match.group(1).replace(',', '.'))
+                    if 50 <= price <= 500:
+                        clean_lines.append(line)  # Precio razonable, mantener
+                    # else: descartar precio fuera de rango
+                except:
+                    pass  # Si no se puede parsear, descartar
+            # else: no hay precio parseable, descartar
+    
+    return '\n'.join(clean_lines)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RETRIEVE CONTEXT - VERSIÓN MEJORADA CON BÚSQUEDA HÍBRIDA + RERANKER
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Reranker (lazy loading) ──────────────────────────────────────
+_reranker = None
+_reranker_loaded = False
+
+def get_reranker():
+    """Carga el modelo de reranker (lazy loading) solo si está habilitado."""
+    global _reranker, _reranker_loaded
+    
+    # Si está desactivado, no cargar
+    if not USE_RERANKER:
+        print("⚠️ Reranker desactivado por configuración (USE_RERANKER=0)")
+        return None
+    
+    if _reranker_loaded:
+        return _reranker
+    
+    try:
+        print("🔄 Cargando modelo de reranker BGE...")
+        from sentence_transformers import CrossEncoder
+        _reranker = CrossEncoder('BAAI/bge-reranker-v2-m3')
+        _reranker_loaded = True
+        print("✅ Reranker cargado exitosamente")
+        return _reranker
+    except ImportError:
+        print("⚠️ sentence-transformers no instalado. Reranker desactivado.")
+        _reranker_loaded = True
+        _reranker = None
+        return None
+    except Exception as e:
+        print(f"⚠️ No se pudo cargar el reranker: {e}")
+        _reranker_loaded = True
+        _reranker = None
+        return None
+
+
+# ── Búsqueda híbrida (BM25 + Vectorial con RRF) ──────────────────
+def _hybrid_search(query: str, docs_with_scores: list, k: int = 10) -> list:
+    """
+    Combina búsqueda vectorial y BM25 usando Reciprocal Rank Fusion (RRF).
+
+    Args:
+        query: Consulta del usuario.
+        docs_with_scores: Lista de tuplas (Document, score_coseno) de ChromaDB.
+        k: Número de documentos a retornar.
+    """
+    if not docs_with_scores:
+        return []
+    
+    try:
+        from rank_bm25 import BM25Okapi
+        import numpy as np
+        
+        # Extraer solo los documentos (sin scores) para BM25
+        docs = [item[0] for item in docs_with_scores]
+        
+        # 1. Preparar documentos para BM25 (tokenización)
+        tokenized_docs = [doc.page_content.split() for doc in docs]
+        bm25 = BM25Okapi(tokenized_docs)
+        
+        # 2. Obtener puntuaciones de BM25 para la consulta
+        tokenized_query = query.split()
+        bm25_scores = bm25.get_scores(tokenized_query)
+        
+        # 3. Reciprocal Rank Fusion (RRF)
+        bm25_ranking = np.argsort(bm25_scores)[::-1]
+        
+        rrf_scores = {}
+        for rank, idx in enumerate(bm25_ranking):
+            rrf_scores[idx] = rrf_scores.get(idx, 0) + 1 / (rank + 60)
+        
+        # Componente vectorial: ordenar por score coseno REAL de ChromaDB
+        # docs_with_scores ya viene ordenado por similitud descendente desde ChromaDB
+        for rank, (doc, score) in enumerate(docs_with_scores):
+            rrf_scores[rank] = rrf_scores.get(rank, 0) + 1 / (rank + 60)
+        
+        # Ordenar por puntuación RRF
+        sorted_indices = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+        
+        return [docs[idx] for idx in sorted_indices[:k]]
+        
+    except ImportError:
+        print("⚠️ rank_bm25 no instalado. Usando solo búsqueda vectorial.")
+        return [item[0] for item in docs_with_scores[:k]]
+    except Exception as e:
+        print(f"⚠️ Error en búsqueda híbrida: {e}")
+        return [item[0] for item in docs_with_scores[:k]]
+
+
+# ── retrieve_context con búsqueda híbrida + reranker ─────────────
+async def retrieve_context_with_rerank(search_query: str, top_k: int = 2) -> str:
+    """
+    Recupera contexto usando búsqueda híbrida + reranker (optimizado).
+    """
+    # 1. Usar un k más pequeño para pruebas
+    k_initial = 5 if USE_RERANKER else 3  # Menos documentos = más rápido
+    
+    docs_with_scores = await asyncio.to_thread(
+        state["db"].similarity_search_with_score,
         search_query,
-        k=TOP_K,
+        k=k_initial,
     )
-    return "\n".join(doc.page_content for doc in docs)
+    
+    if not docs_with_scores:
+        return ""
+    
+    # 2. Búsqueda híbrida (BM25 + Vectorial con scores reales) - si está instalado
+    hybrid_docs = _hybrid_search(search_query, docs_with_scores, k=k_initial)
+    
+    # 3. Reranker - solo si está habilitado
+    reranker = get_reranker()
+    if reranker is not None:
+        try:
+            pairs = [[search_query, doc.page_content] for doc in hybrid_docs]
+            scores = reranker.predict(pairs)
+            
+            ranked_docs = sorted(zip(hybrid_docs, scores), key=lambda x: x[1], reverse=True)
+            final_docs = [doc for doc, score in ranked_docs[:top_k]]
+            
+            print(f"📊 [RERANKER] Seleccionados {len(final_docs)} de {len(hybrid_docs)} documentos")
+            
+        except Exception as e:
+            print(f"⚠️ Error en reranker: {e}")
+            final_docs = hybrid_docs[:top_k]
+    else:
+        final_docs = hybrid_docs[:top_k]
+    
+    result = "\n".join(doc.page_content for doc in final_docs)
+    
+    # 🔥 FILTRAR RUIDO DEL CONTEXTO (metadatos, teléfonos, códigos, etc.)
+    result = _filter_noise_lines(result)
+    
+    _debug_dump("retrieve_context_with_rerank()", search_query, result)
+    return result
+
+
+# ── Función principal retrieve_context (VERSIÓN MEJORADA) ────────
+async def retrieve_context(search_query: str) -> str:
+    """
+    Busca en ChromaDB con búsqueda híbrida (BM25 + vectorial) y reranker.
+    Retorna el contexto como texto.
+    """
+    return await retrieve_context_with_rerank(search_query, top_k=3)
 
 
 def get_promos_text() -> str:
@@ -32,6 +313,33 @@ def build_full_context(rag_context: str, promos_text: str) -> str:
     return f"DOCUMENTOS:\n{rag_context}\n\nPROMOCIONES:\n{promos_text}"
 
 
+def get_full_menu_price_reference() -> str:
+    """
+    Devuelve un contexto amplio y CACHEADO con todos los precios del menú.
+
+    A diferencia de retrieve_context()/retrieve_context_with_rerank(), que
+    usan top_k=2-3 y pueden variar de una consulta a otra, esta función
+    trae un k más grande (20) y guarda el resultado en caché, así que no
+    depende de qué chunk exacto haya recuperado el retrieval para una
+    pregunta puntual del usuario.
+
+    USO: exclusivamente como referencia para validar que el LLM no
+    invente precios (_validate_extras_prices). NUNCA se debe mandar
+    directamente al prompt del LLM como contexto de respuesta, porque
+    no está filtrado/rankeado para relevancia — solo sirve para checar
+    "¿este precio existe en algún lugar del menú real?".
+    """
+    global _price_reference_cache
+    if _price_reference_cache is not None:
+        return _price_reference_cache
+
+    docs = state["db"].similarity_search("precio costo menú pizza MXN", k=20)
+    _price_reference_cache = "\n".join(doc.page_content for doc in docs)
+    # 🔥 FILTRAR RUIDO DE LA REFERENCIA DE PRECIOS
+    _price_reference_cache = _filter_noise_lines(_price_reference_cache)
+    return _price_reference_cache
+
+
 # ═══════════════════════════════════════════════════════════════════
 # EXTRACCIÓN DINÁMICA DE NOMBRES DE PIZZAS
 # ═══════════════════════════════════════════════════════════════════
@@ -40,7 +348,9 @@ def _fetch_pizza_names_from_rag() -> list[str]:
     """Extrae nombres de pizzas del RAG usando patrones dinámicos."""
     try:
         docs = state["db"].similarity_search("pizza menu nombres", k=15)
-        
+        raw_text = "\n".join(doc.page_content for doc in docs)
+        _debug_dump("_fetch_pizza_names_from_rag() - RAW", "pizza menu nombres", raw_text)
+
         names: Set[str] = set()
         
         for doc in docs:
@@ -66,27 +376,23 @@ def _fetch_pizza_names_from_rag() -> list[str]:
                 r'(?:[•\-*]\s*)([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)*)(?=\s*[:$]|$)',
                 text.lower()
             )
-            # Filtrar palabras comunes que no son pizzas
             stop_words = {'descripción', 'ingredientes', 'incluye', 'costo', 'precio', 
                          'tamaño', 'grande', 'menú', 'pizza', 'queso', 'salsa'}
             for name in pattern3:
                 if name not in stop_words and len(name) > 3:
-                    # Verificar que no sea una frase genérica
                     if not any(stop in name for stop in ['descripción', 'ingredientes']):
                         names.add(name)
         
-        # Limpiar nombres
         cleaned = []
         for name in names:
-            # Eliminar descripciones pegadas
             name = re.sub(r'(?:descripción|ingredientes|costo|precio).*$', '', name)
             name = name.strip()
             if name and len(name) > 2:
                 cleaned.append(name)
         
-        # Eliminar duplicados y ordenar
         result = sorted(set(cleaned))
         logger.info("🍕 Pizzas cargadas del RAG: %s", result)
+        _debug_dump("_fetch_pizza_names_from_rag() - RESULTADO", "pizza menu nombres", str(result))
         return result
 
     except Exception as e:
@@ -128,10 +434,7 @@ def get_pizza_examples_for_prompt() -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 def _detect_structured_sections(text: str) -> Dict[str, List[str]]:
-    """
-    Detecta secciones estructuradas en el texto sin usar keywords fijas.
-    Usa patrones de formato (números, títulos, viñetas) para identificar secciones.
-    """
+    """Detecta secciones estructuradas en el texto sin usar keywords fijas."""
     result: Dict[str, List[str]] = {
         "elegibles": [],
         "no_elegibles": [],
@@ -150,17 +453,12 @@ def _detect_structured_sections(text: str) -> Dict[str, List[str]]:
         if not line:
             continue
         
-        # Detectar títulos de sección por formato
-        # Ej: "4.2 Ingredientes elegibles para el Menu"
-        #     "4.3 Ingredientes no elegibles para el Menu"
-        #     "4.4 Adicionales para el Menu"
         title_match = re.match(
             r'^(?:(\d+\.\d+)\s+)?([A-ZÁ-Ú][a-záéíóúñ\s]+[.:]?)(?:\s+|$)',
             line
         )
         
         if title_match:
-            # Guardar sección anterior
             if current_section and section_buffer:
                 content = ' '.join(section_buffer)
                 if 'elegible' in current_section.lower() or 'pueden' in current_section.lower():
@@ -177,18 +475,14 @@ def _detect_structured_sections(text: str) -> Dict[str, List[str]]:
             section_titles.append(current_section)
             continue
         
-        # Si estamos dentro de una sección, acumular
         if current_section:
-            # Si la línea parece un ítem de lista (con viñeta, guión, número)
             if re.match(r'^[\s]*[•\-*]\s+', line) or re.match(r'^[\s]*\d+\.\s+', line):
-                # Limpiar y agregar
                 clean = re.sub(r'^[\s]*[•\-*]\s+', '', line)
                 clean = re.sub(r'^[\s]*\d+\.\s+', '', clean)
                 section_buffer.append(clean)
-            elif line and len(line) > 10:  # Texto descriptivo
+            elif line and len(line) > 10:
                 section_buffer.append(line)
     
-    # Procesar última sección
     if current_section and section_buffer:
         content = ' '.join(section_buffer)
         if 'elegible' in current_section.lower() or 'pueden' in current_section.lower():
@@ -204,16 +498,11 @@ def _detect_structured_sections(text: str) -> Dict[str, List[str]]:
 
 
 def _extract_items_from_text(text: str) -> List[str]:
-    """
-    Extrae ítems (ingredientes, precios, etc.) de un texto.
-    Totalmente dinámico - no usa keywords fijos.
-    """
+    """Extrae ítems (ingredientes, precios, etc.) de un texto."""
     items = []
     
-    # Intentar extraer por comas
     if ',' in text:
         parts = [p.strip() for p in text.split(',')]
-        # Si hay "y" en la última parte, dividir también
         if len(parts) > 1:
             last = parts[-1]
             if ' y ' in last:
@@ -226,34 +515,26 @@ def _extract_items_from_text(text: str) -> List[str]:
     else:
         items.append(text.strip())
     
-    # Limpiar y filtrar
     cleaned = []
     for item in items:
         if not item:
             continue
-        # Eliminar números de sección, prefijos, etc.
         item = re.sub(r'^[\d]+\.?\s*', '', item)
         item = re.sub(r'^[\s•\-*]+', '', item)
         item = re.sub(r'\s+', ' ', item).strip()
-        # Eliminar palabras que suenan a descripciones generales
         if len(item) > 1 and not item.startswith(('la ', 'el ', 'los ', 'las ')):
-            # Si tiene formato de precio, mantenerlo
             if re.search(r'\$\s*\d+', item):
                 cleaned.append(item)
-            elif len(item.split()) <= 4:  # Probablemente un ingrediente
+            elif len(item.split()) <= 4:
                 cleaned.append(item)
     
-    return list(dict.fromkeys(cleaned))  # Eliminar duplicados manteniendo orden
+    return list(dict.fromkeys(cleaned))
 
 
 def _extract_ingredients_from_text(text: str) -> Set[str]:
-    """
-    Extrae posibles ingredientes del texto sin usar keywords fijas.
-    Busca patrones de listas y estructuras.
-    """
+    """Extrae posibles ingredientes del texto sin usar keywords fijas."""
     ingredients = set()
     
-    # Buscar patrones de lista: "ingredientes: X, Y, Z" o "incluye X, Y, Z"
     list_patterns = [
         r'(?:ingredientes?|incluye|contiene|componentes?)\s*[:;]\s*([^.]+\n?)',
         r'(?:con|de)\s+([a-záéíóúñ]+(?:,\s*[a-záéíóúñ]+)*)',
@@ -262,29 +543,24 @@ def _extract_ingredients_from_text(text: str) -> Set[str]:
     for pattern in list_patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
-            # Dividir por comas, "y", "&"
             parts = re.split(r',\s*|\s+y\s+|\s*&\s*', match)
             for part in parts:
                 clean = part.strip().lower()
                 if clean and len(clean) > 2:
                     ingredients.add(clean)
     
-    # Buscar líneas que parecen ítems de menú
     for line in text.split('\n'):
         line = line.strip()
         if not line:
             continue
         
-        # Si la línea tiene formato de precio, puede ser un adicional
         if re.search(r'\$\s*\d+', line):
-            # Extraer el nombre del producto (antes del precio)
             name_match = re.match(r'^([^$]+?)\s*\$', line)
             if name_match:
                 name = name_match.group(1).strip()
                 if name and len(name) > 2:
                     ingredients.add(name)
         
-        # Si la línea parece una lista con viñetas
         if re.match(r'^[\s]*[•\-*]\s+', line):
             clean = re.sub(r'^[\s]*[•\-*]\s+', '', line)
             if clean and len(clean) > 2:
@@ -294,20 +570,7 @@ def _extract_ingredients_from_text(text: str) -> Set[str]:
 
 
 def _clean_extras_and_extract_price(items: List[str]) -> tuple[List[str], str]:
-    """
-    Separa el precio que viene pegado al último ingrediente en el texto del PDF.
-    
-    El PDF suele tener el formato:
-      "pepperoni, pimiento, cebolla, aceitunas, atún cada Ingrediente extra $ 45.00 MXN"
-    
-    Al splitear por comas, el último ítem queda como
-      "atún cada Ingrediente extra $ 45.00 MXN"
-    con el precio embebido. Esta función:
-      1. Detecta el precio en cualquier ítem.
-      2. Limpia el nombre del ítem (elimina el sufijo de precio).
-      3. Devuelve (nombres_limpios, precio_formateado).
-    El precio es "común" porque el PDF dice "cada ingrediente extra $ XX".
-    """
+    """Separa el precio que viene pegado al último ingrediente en el texto del PDF."""
     price_pattern = re.compile(r'\$\s*(\d+(?:\.\d{2})?)\s*(?:MXN|mxn)?', re.IGNORECASE)
     common_price = ""
     clean_names: List[str] = []
@@ -315,9 +578,7 @@ def _clean_extras_and_extract_price(items: List[str]) -> tuple[List[str], str]:
     for item in items:
         m = price_pattern.search(item)
         if m:
-            # Guardar precio (formato normalizado)
             common_price = f"$ {m.group(1)} MXN"
-            # Limpiar nombre: quitar texto que empieza en "cada" o directamente el precio
             name = re.sub(
                 r'\s*(?:cada\s+)?ingrediente[s]?\s+extra.*$', '', item, flags=re.IGNORECASE
             ).strip()
@@ -331,9 +592,7 @@ def _clean_extras_and_extract_price(items: List[str]) -> tuple[List[str], str]:
 
 
 def get_available_extras_context(pizza_name: Optional[str] = None) -> str:
-    """
-    Recupera información de extras del RAG de forma 100% dinámica.
-    """
+    """Recupera información de extras y precios del menú del RAG (filtrado anti-ruido)."""
     global _extras_cache
     
     cache_key = f"extras_{pizza_name or 'general'}"
@@ -342,45 +601,57 @@ def get_available_extras_context(pizza_name: Optional[str] = None) -> str:
         return _extras_cache[cache_key]
     
     try:
-        # Construir consulta dinámica
         if pizza_name:
             search_query = f"ingredientes adicionales extras {pizza_name}"
         else:
-            search_query = "menu adicionales ingredientes extras"
+            search_query = "menu adicionales ingredientes extras precios pizzas"
         
-        docs = state["db"].similarity_search(search_query, k=TOP_K)
+        # Buscar con más documentos para capturar todo el menú
+        docs = state["db"].similarity_search(search_query, k=15)
         full_text = "\n".join(doc.page_content for doc in docs)
         
-        # 1. Intentar extraer por secciones estructuradas
-        structured = _detect_structured_sections(full_text)
+        # 🔥 FILTRAR RUIDO ANTES DE PROCESAR
+        full_text = _filter_noise_lines(full_text)
+        _debug_dump("get_available_extras_context() - RAW", search_query, full_text)
         
-        # 2. También extraer ingredientes directamente
+        # ── EXTRAER PRECIOS DEL MENÚ (SOLO PIZZAS VÁLIDAS) ──────────
+        menu_prices = []
+        price_pattern = r'(?:Pizza\s+)?([A-ZÁ-Ú][a-záéíóúñ]+(?:\s+[A-ZÁ-Ú][a-záéíóúñ]+)*)\s*[:;]?\s*\$?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:MXN|mxn|pesos)?'
+        
+        for match in re.finditer(price_pattern, full_text, re.IGNORECASE):
+            name = match.group(1).strip()
+            price = match.group(2).replace(",", ".")
+            
+            # Validar: nombre de pizza real + precio razonable
+            if _is_valid_pizza_name(name) and _is_valid_price(price):
+                menu_prices.append(f"  • {name}: ${price} MXN")
+        
+        # Deduplicar manteniendo orden
+        seen = set()
+        unique_prices = []
+        for p in menu_prices:
+            if p not in seen:
+                seen.add(p)
+                unique_prices.append(p)
+        menu_prices = unique_prices[:20]  # Máx 20 pizzas
+        
+        # ── EXTRAER INGREDIENTES EXTRA ────────────────────────────
+        structured = _detect_structured_sections(full_text)
         ingredients = _extract_ingredients_from_text(full_text)
         
-        # 3. Si no hay secciones estructuradas, intentar con el texto completo
-        if not any(structured.values()):
-            # Dividir el texto en bloques temáticos
-            blocks = re.split(r'\n{2,}', full_text)
-            for block in blocks:
-                if not block.strip():
-                    continue
-                # Si el bloque tiene precio, es un adicional
-                if re.search(r'\$\s*\d+', block):
-                    structured["adicionales"].extend(_extract_items_from_text(block))
-                # Si el bloque habla de "elegible" o "permitido"
-                elif re.search(r'elegible|permitido|disponible', block, re.IGNORECASE):
-                    structured["elegibles"].extend(_extract_items_from_text(block))
-                # Si habla de "no elegible" o "no permitido"
-                elif re.search(r'no\s+elegible|no\s+permitido|no\s+disponible', block, re.IGNORECASE):
-                    structured["no_elegibles"].extend(_extract_items_from_text(block))
-        
-        # Construir resultado
         sections = []
         
+        # 🔥 PRIMERO: Mostrar el menú con precios validados
+        if menu_prices:
+            sections.append("🍕 **Menú de Pizzería 220 (tamaño Grande):**")
+            sections.extend(menu_prices)
+            sections.append("")
+        
+        # Luego los extras
         if structured["elegibles"]:
             names, price = _clean_extras_and_extract_price(structured["elegibles"])
             price_label = f" ({price} c/u)" if price else ""
-            sections.append(f"🍕 **Ingredientes extra disponibles{price_label}:**")
+            sections.append(f"➕ **Ingredientes extra disponibles{price_label}:**")
             for item in names[:15]:
                 price_suffix = f"  —  {price}" if price else ""
                 sections.append(f"  • {item}{price_suffix}")
@@ -392,54 +663,22 @@ def get_available_extras_context(pizza_name: Optional[str] = None) -> str:
                 sections.append(f"  • {item}")
             sections.append("")
         
-        _ADICIONALES_NOISE = {'menú', 'menu', 'pizza', 'ingrediente', 'ingredientes'}
-        if structured["adicionales"]:
-            real_adicionales = [
-                it for it in structured["adicionales"]
-                if it.lower().strip() not in _ADICIONALES_NOISE and len(it.strip()) > 3
-            ]
-            if real_adicionales:
-                sections.append("💰 **Adicionales disponibles:**")
-                for item in real_adicionales[:10]:
-                    sections.append(f"  • {item}")
-                sections.append("")
-        
-        if structured["precios"]:
-            sections.append("💲 **Precios de adicionales:**")
-            for item in structured["precios"][:10]:
-                sections.append(f"  • {item}")
-            sections.append("")
-        
-        # Si no hay nada, usar ingredientes extraídos
-        if not sections and ingredients:
-            sections.append("📋 **Ingredientes identificados:**")
-            for item in sorted(list(ingredients))[:20]:
-                sections.append(f"  • {item}")
-            sections.append("")
-        
-        # Si aún no hay nada, usar el texto filtrado
+        # ── FALLBACK: si no se encontró nada estructurado ──────────
         if not sections:
-            # Intentar extraer cualquier línea que parezca relevante
-            relevant_lines = []
+            # Buscar líneas con precios
+            price_lines = []
             for line in full_text.split('\n'):
-                line = line.strip()
-                if not line or len(line) < 5:
-                    continue
-                # Si la línea tiene formato de menú (nombre + precio)
-                if re.search(r'[A-Za-záéíóúñ]+\s*\$\s*\d+', line):
-                    relevant_lines.append(f"  • {line}")
-                # Si la línea es corta (probablemente un nombre)
-                elif len(line.split()) <= 4 and len(line) > 3:
-                    relevant_lines.append(f"  • {line}")
+                if re.search(r'\$\s*\d+', line):
+                    price_lines.append(f"  • {line.strip()}")
             
-            if relevant_lines:
-                sections.append("📋 **Información disponible:**")
-                sections.extend(relevant_lines[:15])
+            if price_lines:
+                sections.append("📋 **Información del menú:**")
+                sections.extend(price_lines[:20])
         
         result = "\n".join(sections) if sections else ""
 
-        # Guardar en caché
         _extras_cache[cache_key] = result
+        _debug_dump("get_available_extras_context() - RESULTADO", search_query, result)
         return result
 
     except Exception as e:
@@ -461,7 +700,6 @@ def get_available_sizes() -> list[str]:
         docs = state["db"].similarity_search("tamaño pizzas grande mediana personal", k=5)
         text = "\n".join(doc.page_content for doc in docs)
         
-        # Buscar mención de tamaños
         sizes = re.findall(
             r'(personal|pequeña|mediana|grande|familiar|extra\s+grande)',
             text.lower()

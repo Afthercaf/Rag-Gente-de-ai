@@ -34,7 +34,8 @@ LOCAL_ORIGINS = [
     "http://localhost:8080",
     "http://localhost:8000",
     "https://localhost:5173",
-    "https://localhost:5173"
+    "https://localhost:5173",
+    "https://rag-gente-de-ai.onrender.com"
 ]
 
 ALLOWED_ORIGINS = [

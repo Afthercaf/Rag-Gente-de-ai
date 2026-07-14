@@ -14,15 +14,16 @@ class MemoryCache:
     def get(self, key: str) -> Optional[Any]:
         with self.lock:
             if key in self.cache:
-                data, timestamp = self.cache[key]
-                if time.time() - timestamp < self.ttl:
+                data, timestamp, entry_ttl = self.cache[key]
+                if time.time() - timestamp < entry_ttl:
                     return data
                 del self.cache[key]
         return None
 
     def set(self, key: str, value: Any, ttl: int = None) -> None:
         with self.lock:
-            self.cache[key] = (value, time.time())
+            entry_ttl = ttl if ttl is not None else self.ttl
+            self.cache[key] = (value, time.time(), entry_ttl)
 
     def clear(self) -> None:
         with self.lock:

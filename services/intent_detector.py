@@ -233,6 +233,54 @@ WHICH_EXTRA_SIGNAL = "cuál extra te gustaría agregar"
 # que ya usa _validate_extras_prices() en el servicio de respuesta.
 _PRICE_PATTERN = re.compile(r"\$\s*(\d+(?:[.,]\d{1,2})?)")
 
+# FIX: fallback para cuando el precio en el CONTEXTO no usa "$"
+# (ej. "180 MXN", "180.00 pesos", "Precio: 180", "precio 180.00").
+# Se usa SOLO si _PRICE_PATTERN no encontró nada — nunca reemplaza al
+# match con "$", que sigue siendo el criterio principal.
+_PRICE_PATTERN_FALLBACK = re.compile(
+    r"(?:precio|costo|valor)\s*[:=-]?\s*(?:mxn|usd)?\s*\$?\s*(\d+(?:[.,]\d{1,2})?)"
+    r"|(\d+(?:[.,]\d{1,2})?)\s*(?:mxn|pesos|usd)\b",
+    re.IGNORECASE,
+)
+
+
+def _search_price_pattern(line: str) -> float | None:
+    """
+    Busca precios en una línea de texto.
+    MEJORADO: Maneja múltiples formatos de precio.
+    """
+    if not line:
+        return None
+    
+    # ── Patrones de precio en orden de prioridad ──
+    patterns = [
+        # 1. Con símbolo $ y MXN
+        r'\$\s*(\d+(?:[.,]\d{1,2})?)\s*(?:MXN|mxn|pesos)?',
+        # 2. Con símbolo $ solo
+        r'\$\s*(\d+(?:[.,]\d{1,2})?)',
+        # 3. Con "MXN" o "pesos" sin $
+        r'(\d+(?:[.,]\d{1,2})?)\s*(?:MXN|mxn|pesos)\b',
+        # 4. Con "precio" o "costo" sin $
+        r'(?:precio|costo|valor)\s*[:=]?\s*\$?\s*(\d+(?:[.,]\d{1,2})?)',
+        # 5. Número con formato de moneda
+        r'\b(\d+(?:[.,]\d{1,2})?)\s*(?:mxn|pesos|usd|dólares)\b',
+    ]
+    
+    for pattern in patterns:
+        try:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                raw = match.group(1)
+                if raw:
+                    # Limpiar el string
+                    clean = raw.strip()
+                    if clean:
+                        return float(clean.replace(",", "."))
+        except:
+            continue
+    
+    return None
+
 # ══════════════════════════════════════════════════════════════════
 # RESPUESTA LITERAL — bypass total del LLM para el resumen final
 # ══════════════════════════════════════════════════════════════════
@@ -514,33 +562,92 @@ def _get_pizza_names_from_history(history: list[dict]) -> list[str]:
 
 def _extract_price_near(text: str, target_name: str) -> float | None:
     """
-    Busca `target_name` (sin tildes/mayúsculas) dentro de `text` y
-    devuelve el primer precio "$NN" o "$NN.NN" que aparezca en esa
-    misma línea, o en alguna de las 3 líneas siguientes si el nombre y
-    el precio están en líneas separadas (ej. fichas tipo "Pizza X" /
-    "Ingredientes: ..." / "Precio: $180").
-
-    Devuelve None si no encuentra ninguna coincidencia clara — nunca
-    inventa un número.
+    Busca `target_name` en `text` y devuelve el precio que le corresponde.
+    VERSIÓN FINAL: Busca en TODO el contexto con múltiples estrategias.
     """
     if not text or not target_name:
         return None
 
     target_norm = _normalize(target_name)
-    lines = text.split("\n")
-
+    
+    # ── ESTRATEGIA 1: Buscar en el contexto completo con patrones ──
+    # Patrón: "Pizza [Nombre]: $X.XX MXN" o "Pizza [Nombre] ... $X.XX"
+    patterns = [
+        # 1. "Pizza Mexicana: $180.00 MXN"
+        rf'(?:Pizza\s+)?{target_norm}[:\s]+.*?\$(\d+(?:[.,]\d{{1,2}})?)',
+        # 2. "Pizza Mexicana $180.00 MXN"
+        rf'(?:Pizza\s+)?{target_norm}.*?\$(\d+(?:[.,]\d{{1,2}})?)',
+        # 3. "Mexicana: $180.00"
+        rf'{target_norm}[:\s]+.*?\$(\d+(?:[.,]\d{{1,2}})?)',
+        # 4. "Pizza Mexicana cuesta $180.00"
+        rf'(?:Pizza\s+)?{target_norm}.*?(?:cuesta|costo|precio|valor).*?\$(\d+(?:[.,]\d{{1,2}})?)',
+    ]
+    
+    for pattern in patterns:
+        try:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                price_str = match.group(1)
+                if price_str:
+                    return float(price_str.replace(",", "."))
+        except:
+            continue
+    
+    # ── ESTRATEGIA 2: Buscar en líneas específicas ──
+    lines = text.split('\n')
     for i, line in enumerate(lines):
         if target_norm in _normalize(line):
-            match = _PRICE_PATTERN.search(line)
-            if match:
-                return float(match.group(1).replace(",", "."))
-            for next_line in lines[i + 1: i + 4]:
-                match = _PRICE_PATTERN.search(next_line)
-                if match:
-                    return float(match.group(1).replace(",", "."))
-            break  # ya encontramos el bloque del nombre, no sigas buscando otro
-
+            # Buscar precio en esta línea
+            price = _search_price_pattern(line)
+            if price is not None:
+                return price
+            
+            # Buscar en las siguientes 5 líneas
+            for offset in range(1, 6):
+                if i + offset < len(lines):
+                    price = _search_price_pattern(lines[i + offset])
+                    if price is not None:
+                        return price
+            break
+    
+    # ── ESTRATEGIA 3: Buscar cualquier precio en el contexto ──
+    # Buscar todos los precios en el texto y asociarlos
+    all_prices = re.findall(r'\$(\d+(?:[.,]\d{1,2})?)', text)
+    if all_prices:
+        # Si solo hay un precio, devolverlo
+        if len(all_prices) == 1:
+            try:
+                return float(all_prices[0].replace(",", "."))
+            except:
+                pass
+        
+        # Si hay varios precios, buscar el que está más cerca del nombre
+        # Usar la posición del nombre en el texto
+        try:
+            pos = text.lower().find(target_norm)
+            if pos != -1:
+                # Buscar el precio más cercano al nombre
+                min_dist = float('inf')
+                closest_price = None
+                for price_str in all_prices:
+                    price_pos = text.find(f'${price_str}')
+                    if price_pos != -1:
+                        dist = abs(pos - price_pos)
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_price = price_str
+                if closest_price:
+                    return float(closest_price.replace(",", "."))
+        except:
+            pass
+    
     return None
+
+def debug_price_extraction(context: str, pizza_name: str) -> None:
+    """Función de debug para verificar extracción de precios."""
+    result = _extract_price_near(context, pizza_name)
+    print(f"🔍 [DEBUG PRICE] '{pizza_name}' -> {result}")
+    return result
 
 
 def _parse_priced_items(block: str) -> list[tuple[str, float]]:
@@ -587,29 +694,82 @@ def _sum_requested_extras(extra_answer: str, extras_context: str) -> tuple[float
 
 def _compute_total(pizza: str, extras_answer: str, extras_context: str, context: str) -> str:
     """
-    Calcula el Total real del pedido:
-
-        Total = precio de la Pizza (buscado en `context`)
-              + suma de los extras elegidos (buscados en `extras_context`)
-
-    Si el cliente no pidió extras ("Ninguno"), solo se cobra la pizza.
-    Si pidió extras pero no se pudo emparejar ninguno con una línea de
-    `extras_context` (ej. porque usó palabras distintas a las del
-    catálogo), o si no se encontró el precio de la pizza, se devuelve
-    "[precio no disponible]" en vez de arriesgar un número incorrecto.
+    Calcula el Total real del pedido.
+    
+    MEJORADO: Múltiples estrategias para encontrar el precio.
     """
+    # ── INTENTAR 1: Función principal ──
     pizza_price = _extract_price_near(context, pizza)
-
+    
+    # ── INTENTAR 2: Si falla, buscar en todo el contexto ──
+    if pizza_price is None:
+        lines = context.split('\n')
+        for line in lines:
+            if pizza.lower() in _normalize(line):
+                price = _search_price_pattern(line)
+                if price is not None:
+                    pizza_price = price
+                    break
+    
+    # ── INTENTAR 3: Buscar por patrón "Pizza [Nombre]: $X.XX" ──
+    if pizza_price is None:
+        pattern = rf'(?:Pizza\s+)?{re.escape(pizza.lower())}[:\s]+.*?\$(\d+(?:[.,]\d{{1,2}})?)'
+        match = re.search(pattern, context.lower(), re.IGNORECASE | re.DOTALL)
+        if match:
+            try:
+                pizza_price = float(match.group(1).replace(",", "."))
+            except:
+                pass
+    
+    # ── INTENTAR 4: Buscar por patrón "Pizza [Nombre] ... $X.XX" ──
+    if pizza_price is None:
+        pattern = rf'Pizza\s+{re.escape(pizza.lower())}.*?\$(\d+(?:[.,]\d{{1,2}})?)'
+        match = re.search(pattern, context.lower(), re.IGNORECASE | re.DOTALL)
+        if match:
+            try:
+                pizza_price = float(match.group(1).replace(",", "."))
+            except:
+                pass
+    
+    # ── INTENTAR 5: Último recurso - buscar en el contexto completo ──
+    if pizza_price is None:
+        # Buscar cualquier precio asociado a la pizza
+        lines = context.split('\n')
+        for i, line in enumerate(lines):
+            if "pizza" in _normalize(line) and pizza.lower() in _normalize(line):
+                price = _search_price_pattern(line)
+                if price is not None:
+                    pizza_price = price
+                    break
+                
+                # Buscar en las líneas siguientes
+                for offset in range(1, 6):
+                    if i + offset < len(lines):
+                        price = _search_price_pattern(lines[i + offset])
+                        if price is not None:
+                            pizza_price = price
+                            break
+                if pizza_price is not None:
+                    break
+    
+    # Si no se encontró precio, retornar "[precio no disponible]"
+    if pizza_price is None:
+        print(f"⚠️ [PRICE] No se encontró precio para: '{pizza}'")
+        return "[precio no disponible]"
+    
+    # ── CALCULAR EXTRAS ──
     if is_no_in_order_flow(extras_answer):
-        extras_total, extras_resolved = 0.0, True
+        extras_total = 0.0
+        extras_resolved = True
     else:
         extras_total, extras_found = _sum_requested_extras(extras_answer, extras_context)
         extras_resolved = bool(extras_found)
-
-    if pizza_price is not None and extras_resolved:
-        return f"${pizza_price + extras_total:.2f}"
-
-    return "[precio no disponible]"
+    
+    # Si el cliente pidió extras pero no se resolvieron, marcar como no disponible
+    if not is_no_in_order_flow(extras_answer) and not extras_resolved:
+        return "[precio no disponible]"
+    
+    return f"${pizza_price + extras_total:.2f}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1103,9 +1263,10 @@ def build_directive(
     if has_menu_intent(question):
         print("✅ [DEBUG MATCH] Caso detectado: MENÚ COMPLETO")
         return (
-            "Muestra el menú completo del CONTEXTO. "
-            "No menciones pedidos anteriores ni pedidos en curso. "
-            "Al final pregunta: '¿Cuál te llama la atención? 🍕'"
+        "Muestra el menú completo del CONTEXTO. "
+        "INCLUYE LOS PRECIOS DE CADA PIZZA tal como aparecen en el CONTEXTO. "
+        "No inventes precios. Si un precio no está en el CONTEXTO, di '[precio no disponible]'. "
+        "Al final pregunta: '¿Cuál te llama la atención? 🍕'"
         )
 
     # ── 3. NUEVA PIZZA MENCIONADA ──────────────────────────────

@@ -47,6 +47,11 @@ async def generate_response(
         print(f"⚠️ [LOG EXTRAS] extras_context está VACÍO o es None: {extras_context!r}")
         print(f"⚠️ [LOG EXTRAS] -> rag_service.get_available_extras_context() no devolvió nada.")
 
+    # ── LOG DIAGNÓSTICO: precios en el contexto RAG ──────────────
+    import re as _re
+    _ctx_prices = _re.findall(r'\$\s*(\d+(?:[.,]\d{1,2})?)', context)
+    print(f"💰 [LOG CONTEXT] Precios encontrados en el contexto RAG: {_ctx_prices}")
+
     # ── OBTENER TOTAL DEL ÚLTIMO PEDIDO (para pago) ──────────────
     total = _extract_last_total(history)
     order_id = _extract_last_order_id(history) or f"PED-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -204,7 +209,7 @@ Total a pagar: **{total if total else "Consultando..."}**
 
     # ── VALIDACIÓN POST-RESPUESTA ───────────────────────────────
     # Si la respuesta contiene precios inventados, marcarlos
-    raw_response = _validate_extras_prices(raw_response, context)
+    raw_response = _validate_extras_prices(raw_response, full_context)
 
     # ── PROCESAR RESPUESTA DE PAGO (si aplica) ──────────────────
     if is_payment and total:
@@ -319,36 +324,49 @@ def _process_payment_response(
 def _validate_extras_prices(response: str, full_context: str) -> str:
     """
     Valida que los precios mencionados en la respuesta existan en el contexto.
-    Si no, los elimina o los marca.
+    Normaliza los precios a float para evitar falsos positivos por diferencias
+    de formato (ej. "105" vs "105.00").
     """
     # Extraer todos los precios de la respuesta
-    price_pattern = r'\$\s*(\d+(?:\.\d{2})?)'
-    response_prices = re.findall(price_pattern, response)
-    
-    if not response_prices:
+    price_pattern = r'\$\s*(\d+(?:[.,]\d{1,2})?)'
+    response_price_strs = re.findall(price_pattern, response)
+
+    if not response_price_strs:
         return response
-    
-    # Extraer precios válidos del contexto
-    valid_prices = re.findall(price_pattern, full_context)
-    valid_prices_set = set(valid_prices)
-    
-    # Si hay precios en la respuesta que no están en el contexto
-    invalid_prices = [p for p in response_prices if p not in valid_prices_set]
-    
-    if invalid_prices:
-        # Opción 1: Eliminar líneas con precios inválidos
+
+    def to_float(s: str) -> float:
+        return float(s.replace(",", "."))
+
+    # Extraer precios válidos del contexto y normalizarlos
+    context_price_strs = re.findall(price_pattern, full_context)
+    valid_prices_float = set(to_float(p) for p in context_price_strs)
+
+    print(f"💰 [PRICE_VALIDATOR] Precios en respuesta: {response_price_strs}")
+    print(f"💰 [PRICE_VALIDATOR] Precios válidos del contexto: {sorted(valid_prices_float)}")
+
+    # Detectar precios en la respuesta que NO existen en el contexto
+    invalid_price_strs = [
+        p for p in response_price_strs
+        if to_float(p) not in valid_prices_float
+    ]
+
+    if invalid_price_strs:
+        print(f"⚠️ [PRICE_VALIDATOR] Precios INVÁLIDOS detectados: {invalid_price_strs}")
         lines = response.split('\n')
         cleaned_lines = []
         for line in lines:
-            # Si la línea tiene un precio inválido, omitirla o reemplazarla
-            for price in invalid_prices:
+            for price in invalid_price_strs:
                 if f'${price}' in line or f'$ {price}' in line:
+                    print(f"🚫 [PRICE_VALIDATOR] Reemplazando precio inválido '${price}' en línea: {line!r}")
                     line = line.replace(f'${price}', '[precio no disponible]')
                     line = line.replace(f'$ {price}', '[precio no disponible]')
             cleaned_lines.append(line)
         response = '\n'.join(cleaned_lines)
-    
+    else:
+        print(f"✅ [PRICE_VALIDATOR] Todos los precios son válidos — sin cambios.")
+
     return response
+
 
 
 def _extract_field(raw: str, name: str) -> str | None:
