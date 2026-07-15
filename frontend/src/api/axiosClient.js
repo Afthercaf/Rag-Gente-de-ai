@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "https://pizzeria-backend-1.tail29c8ce.ts.net:8000" ,
+  baseURL: import.meta.env.VITE_API_URL ?? "http://pizzeria-backend-1.tail29c8ce.ts.net:8000" ,
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
