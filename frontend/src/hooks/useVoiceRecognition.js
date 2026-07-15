@@ -4,7 +4,7 @@
 
 import { useState, useCallback, useRef } from "react";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "https://ai-backend-gu75.onrender.com";
+const API_BASE = import.meta.env.VITE_API_URL ?? "https://killerexpert10.tail29c8ce.ts.net";
 
 export const useVoiceRecognition = ({
   onResult,

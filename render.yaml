@@ -22,7 +22,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://pizzeria-backend-1.tail29c8ce.ts.net:8000
+        value: https://killerexpert10.tail29c8ce.ts.net
     routes:
       - type: rewrite
         source: /*
