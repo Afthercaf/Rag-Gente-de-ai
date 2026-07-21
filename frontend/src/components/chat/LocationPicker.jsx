@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { s } from '../../styles/theme';
+import { s, CLS } from '../../styles/theme';
 
 export default function LocationPicker({ onLocationSelect, onClose }) {
   const [loading, setLoading] = useState(false);
@@ -120,13 +120,14 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
   }, []);
 
   return (
-    <div style={s.locOverlay}>
-      <div style={s.locModal}>
+    <div className="p220-loc-overlay" style={s.locOverlay}>
+      <div className={CLS.locModal} style={s.locModal}>
 
         {/* Header */}
         <div style={s.locHeader}>
           <span style={s.locTitle}>📍 Selecciona tu ubicación</span>
           <button
+            className={CLS.closeBtn}
             style={s.locCloseBtn}
             onClick={() => { if (!loading && !hasSelected.current) onClose(); }}
             disabled={loading}
@@ -140,6 +141,7 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
 
           {/* Botón GPS */}
           <button
+            className={CLS.gpsBtn}
             style={{ ...s.locGpsBtn, opacity: loading || hasSelected.current ? 0.5 : 1 }}
             onClick={getCurrentLocation}
             disabled={loading || hasSelected.current}
@@ -165,6 +167,7 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
               }}
             />
             <button
+              className={CLS.searchBtn}
               style={s.locSearchBtn}
               disabled={loading || hasSelected.current}
               onClick={() => {
@@ -209,6 +212,7 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
 
           {/* Confirmar */}
           <button
+            className={CLS.confirmBtn}
             style={
               hasSelected.current
                 ? s.locConfirmBtnDone

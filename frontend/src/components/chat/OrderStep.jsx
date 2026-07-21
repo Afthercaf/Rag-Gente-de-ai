@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { s } from "../../styles/theme";
+import { s, CLS } from "../../styles/theme";
 
 // Etiquetas visibles para cada valor real de payment_method.
 // Si se agrega un nuevo método de pago, solo hay que añadirlo aquí.
@@ -26,7 +26,7 @@ export default function OrderStep({ step, onSubmit }) {
   };
 
   return (
-    <div style={s.orderCard}>
+    <div className={CLS.orderCard} style={s.orderCard}>
       <div style={s.orderLabel}>{step.label}</div>
 
       {step.type === "select" ? (
@@ -34,6 +34,7 @@ export default function OrderStep({ step, onSubmit }) {
           {step.options.map((opt) => (
             <button
               key={opt}
+              className={CLS.optBtn}
               onClick={() => onSubmit(opt)}
               style={{ ...s.optBtn, ...(val === opt ? s.optBtnActive : {}) }}
             >

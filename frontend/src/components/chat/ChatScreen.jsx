@@ -407,7 +407,7 @@ import { clearSession } from "../../utils/session";
 import { nextId, getOrderSteps } from "../../utils/orderUtils";
 import { useOrderStatus } from "../../hooks/useOrderStatus.js";
 import { useVoiceRecognition } from "../../hooks/useVoiceRecognition";
-import { s } from "../../styles/theme";
+import { s, CLS } from "../../styles/theme";
 import { MessageBubble } from "./MessageBubble";
 import OrderStep from "./OrderStep";
 import { TypingIndicator, SendIcon } from "./ChatUIElements";
@@ -516,34 +516,66 @@ export default function ChatScreen({ user, onLogout }) {
       })
     : [];
 
+  const isPaymentPrompt = (reply = "") => {
+    const normalized = reply
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return (
+      normalized.includes("como deseas pagar") ||
+      normalized.includes("como vas a pagar") ||
+      normalized.includes("metodo de pago") ||
+      normalized.includes("elige tu metodo de pago")
+    );
+  };
+
+  const isOrderDraft = (reply = "") => {
+    const normalized = reply
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return normalized.includes("confirmas tu pedido");
+  };
+
   const sendMessage = async (text) => {
     if (!text.trim()) return;
+
     console.log("📤 [sendMessage] Iniciando envío de texto:", text);
+
     if (isListening) stopListening();
+
     addMsg("user", text);
     setInput("");
     setLoading(true);
+
     try {
-      console.log(`🌐 [API sendChat] Solicitando con - text: "${text}", userId: ${user?.id}`);
+      console.log(
+        `🌐 [API sendChat] Solicitando con - text: "${text}", userId: ${user?.id}`
+      );
+
       const data = await sendChat(text, user.id);
       console.log("📥 [API sendChat] Respuesta recibida:", data);
 
       addMsg("bot", data.reply);
 
-      if (data.is_order) {
-        console.log("🍕 [sendMessage] La respuesta es una orden (is_order: true)");
-        const orderText = data.order_details?.raw || text;
-        const orderTotal = data.order_details?.total || null;
-        
-        const missingFields = [];
-        if (!user?.nombre)   missingFields.push("cliente_nombre");
-        if (!user?.telefono)  missingFields.push("telefono");
-        if (!user?.gmail)     missingFields.push("gmail");
-        if (!user?.direccion) missingFields.push("direccion");
-        
-        console.log("📋 [sendMessage] Campos faltantes detectados:", missingFields);
+      const paymentPrompt =
+        data.payment_required === true ||
+        data.awaiting_payment === true ||
+        isPaymentPrompt(data.reply);
 
-        const initialPendingData = {
+      const orderDraft = data.is_order && isOrderDraft(data.reply);
+
+      /*
+       * 1. Cuando llega el resumen del pedido, solo guardamos sus datos.
+       *    NO abrimos todavía los métodos de pago.
+       */
+      if (data.is_order && data.order_details) {
+        const orderText = data.order_details.raw || text;
+        const orderTotal = data.order_details.total || null;
+
+        const nextPendingOrder = {
           pedido: orderText,
           data: {
             cliente_nombre: user?.nombre || "",
@@ -551,23 +583,61 @@ export default function ChatScreen({ user, onLogout }) {
             gmail: user?.gmail || "",
             direccion: user?.direccion || "",
             total: orderTotal,
-            payment_method: "efectivo",
           },
         };
-        setPendingOrderData(initialPendingData);
-        console.log("💾 [sendMessage] Guardando pendingOrderData inicial:", initialPendingData);
 
-        if (true) {
-          const formSetup = {
-            pedido: orderText, step: 0,
-            data: { cliente_nombre: user?.nombre || "", telefono: user?.telefono || "", gmail: user?.gmail || "", direccion: user?.direccion || "", total: orderTotal },
-          };
-          setOrderForm(formSetup);
-          console.log("📝 [sendMessage] Abriendo formulario secuencial orderForm:", formSetup);
-          addMsg("bot", missingFields.length > 0
-            ? "🛵 Necesito algunos datos para completar tu pedido."
-            : "💳 ¿Cómo vas a pagar?");
-        }
+        setPendingOrderData(nextPendingOrder);
+        console.log(
+          "💾 [sendMessage] Pedido guardado a la espera de confirmación:",
+          nextPendingOrder
+        );
+      }
+
+      /*
+       * 2. El formulario se abre únicamente cuando el backend ya confirmó
+       *    el pedido y solicita el método de pago.
+       *
+       *    El mensaje del backend ya pregunta cómo pagar, por eso NO
+       *    agregamos otro mensaje "¿Cómo vas a pagar?" desde el frontend.
+       */
+      if (paymentPrompt) {
+        const storedOrder = pendingOrderData;
+
+        const orderText =
+          data.order_details?.raw ||
+          storedOrder?.pedido ||
+          text;
+
+        const orderTotal =
+          data.order_details?.total ||
+          storedOrder?.data?.total ||
+          null;
+
+        const formSetup = {
+          pedido: orderText,
+          step: 0,
+          data: {
+            cliente_nombre: user?.nombre || "",
+            telefono: user?.telefono || "",
+            gmail: user?.gmail || "",
+            direccion: user?.direccion || "",
+            total: orderTotal,
+          },
+        };
+
+        setPendingOrderData(formSetup);
+        setOrderForm(formSetup);
+
+        console.log(
+          "💳 [sendMessage] Abriendo selector único de método de pago:",
+          formSetup
+        );
+      } else if (orderDraft) {
+        /*
+         * El resumen todavía espera confirmación.
+         * Aseguramos que no quede abierto un formulario viejo.
+         */
+        setOrderForm(null);
       }
     } catch (err) {
       console.error("❌ [sendMessage] Error en la petición:", err);
@@ -576,6 +646,7 @@ export default function ChatScreen({ user, onLogout }) {
       setLoading(false);
     }
   };
+
 
   const normalizeOrderText = (pedido) => {
     const original = pedido;
@@ -765,10 +836,10 @@ ${
     <>
       <div style={s.root}>
         <div style={s.bgPattern} />
-        <div style={s.shell}>
+        <div className={CLS.shell} style={s.shell}>
 
           {/* ── Header ────────────────────────────────────────────────────────── */}
-          <header style={s.header}>
+          <header className={CLS.header} style={s.header}>
             <div style={s.logoWrap}>
               <span style={s.logoEmoji}>🍕</span>
               <div>
@@ -779,32 +850,32 @@ ${
                 </div>
               </div>
             </div>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
               <div style={s.userBadge}>
                 <span style={s.userInitial}>{(user?.nombre || "U")[0].toUpperCase()}</span>
-                <span style={s.userName}>{user?.nombre}</span>
+                <span className={CLS.userName} style={s.userName}>{user?.nombre}</span>
                 <span style={s.userRole}>{user?.role}</span>
               </div>
-              <button onClick={handleLogout} style={s.logoutBtn} title="Cerrar sesión">⎋</button>
+              <button className={CLS.logoutBtn} onClick={handleLogout} style={s.logoutBtn} title="Cerrar sesión">⎋</button>
               <div style={s.dot} />
             </div>
           </header>
 
           {/* ── Feed ──────────────────────────────────────────────────────────── */}
-          <div style={s.feed}>
+          <div className={CLS.feed} style={s.feed}>
             {messages.map((msg) => (
               <div key={msg.id}>
                 <MessageBubble msg={msg} />
                 
                 {/* QR Code */}
                 {msg.qrCodeBase64 && (
-                  <div style={{ marginTop: 8, marginLeft: 50 }}>
+                  <div style={{ marginTop: 8, marginLeft: 50, maxWidth: "calc(100% - 50px)" }}>
                     <img
                       src={`data:image/png;base64,${msg.qrCodeBase64}`}
                       alt="Código QR de Mercado Pago"
                       style={{
-                        width: 220,
-                        height: 220,
+                        width: "min(220px, 55vw)",
+                        height: "min(220px, 55vw)",
                         borderRadius: 12,
                         border: "1px solid rgba(0,0,0,.08)",
                         boxShadow: "0 2px 10px rgba(0,0,0,.08)",
@@ -816,32 +887,13 @@ ${
 
                 {/* Botón de pago Mercado Pago */}
                 {msg.paymentUrl && (
-                  <div style={{ marginTop: 10, marginLeft: 50 }}>
+                  <div style={{ marginTop: 10, marginLeft: 50, maxWidth: "calc(100% - 50px)" }}>
                     <a
                       href={msg.paymentUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{
-                        display: "inline-block",
-                        padding: "12px 24px",
-                        background: "linear-gradient(135deg, #009ee3 0%, #0073b7 100%)",
-                        color: "#fff",
-                        borderRadius: 10,
-                        textDecoration: "none",
-                        fontWeight: "bold",
-                        fontSize: 15,
-                        boxShadow: "0 4px 15px rgba(0, 158, 227, 0.35)",
-                        transition: "transform 0.15s ease, box-shadow 0.15s ease",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "scale(1.02)";
-                        e.currentTarget.style.boxShadow = "0 6px 25px rgba(0, 158, 227, 0.45)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "scale(1)";
-                        e.currentTarget.style.boxShadow = "0 4px 15px rgba(0, 158, 227, 0.35)";
-                      }}
+                      className={CLS.link}
+                      style={s.payLink}
                     >
                       <span style={{ marginRight: 8 }}>💳</span>
                       Pagar con Mercado Pago
@@ -869,21 +921,18 @@ ${
                 )}
 
                 {msg.requiresLocation && !showLocationPicker && !loading && pendingOrderData && (
-                  <div style={{ marginTop:8, marginLeft:50 }}>
+                  <div style={{ marginTop:8, marginLeft:50, maxWidth: "calc(100% - 50px)" }}>
                     <button
+                      className={CLS.confirmBtn}
                       onClick={() => {
                         console.log("🗺️ [UI] Botón compartir ubicación clickeado. Abriendo LocationPicker.");
                         setShowLocationPicker(true);
                       }}
                       disabled={isSubmittingOrder}
                       style={{
-                        backgroundColor:"#10b981", color:"white",
-                        padding:"8px 16px", borderRadius:8, border:"none",
+                        ...s.shareLocBtn,
                         cursor: isSubmittingOrder ? "not-allowed" : "pointer",
-                        fontSize:14, fontWeight:"bold",
-                        display:"inline-flex", alignItems:"center", gap:8,
                         opacity: isSubmittingOrder ? 0.5 : 1,
-                        boxShadow:"0 2px 10px rgba(16,185,129,.25)",
                       }}
                     >
                       📍 Compartir mi ubicación
@@ -903,11 +952,12 @@ ${
 
           {/* ── Input bar ─────────────────────────────────────────────────────── */}
           {!orderForm && (
-            <div style={s.inputBar}>
+            <div className={CLS.inputBar} style={s.inputBar}>
 
               {/* Botón de voz */}
               {isSupported && (
                 <button
+                  className={CLS.micBtn}
                   onClick={handleVoiceClick}
                   disabled={loading || isSubmittingOrder}
                   style={micBtnStyle}
@@ -951,6 +1001,7 @@ ${
               />
 
               <button
+                className={CLS.sendBtn}
                 onClick={() => sendMessage(input)}
                 disabled={loading || isSubmittingOrder || !input.trim() || isListening}
                 style={{ ...s.sendBtn, opacity: (loading || isSubmittingOrder || !input.trim() || isListening) ? 0.35 : 1 }}
@@ -989,12 +1040,7 @@ ${
 
       {/* ── Voz no soportada ──────────────────────────────────────────────────── */}
       {!isSupported && (
-        <div style={{
-          position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
-          background:"rgba(239,68,68,.9)", color:"#fff",
-          padding:"10px 20px", borderRadius:12, fontSize:13, zIndex:1000,
-          backdropFilter:"blur(10px)",
-        }}>
+        <div style={s.voiceUnsupported}>
           ⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.
         </div>
       )}

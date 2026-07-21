@@ -1,4 +1,4 @@
-import { s } from "../../styles/theme";
+import { s, CLS } from "../../styles/theme";
 
 /** Renderiza negrita (**texto**) y saltos de línea. */
 function MarkdownText({ text }) {
@@ -24,7 +24,7 @@ export function MessageBubble({ msg }) {
   return (
     <div style={{ ...s.msgRow, justifyContent: isBot ? "flex-start" : "flex-end" }}>
       {isBot && <span style={s.avatar}>🍕</span>}
-      <div style={isBot ? s.bubbleBot : s.bubbleUser}>
+      <div className={CLS.bubble} style={isBot ? s.bubbleBot : s.bubbleUser}>
         <MarkdownText text={msg.text} />
       </div>
     </div>

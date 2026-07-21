@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { register } from "../../api/auth";
 import { saveSession } from "../../utils/session";
-import { s } from "../../styles/theme";
+import { s, CLS } from "../../styles/theme";
 import { AuthShell, Field, Row, AuthBtn, AuthSwitch, ErrorMsg } from "./AuthCommon";
 
 /**
@@ -22,6 +22,13 @@ export default function RegisterScreen({ onLogin, onGo }) {
     const { nombre, telefono, gmail, direccion, password, confirm } = form;
     if (!nombre || !telefono || !gmail || !direccion || !password)
       return setError("Completa todos los campos.");
+
+    // Validación de contraseña: mínimo 8 caracteres y al menos 1 dígito
+    if (password.length < 8)
+      return setError("La contraseña debe tener al menos 8 caracteres.");
+    if (!/\d/.test(password))
+      return setError("La contraseña debe contener al menos un dígito.");
+
     if (password !== confirm)
       return setError("Las contraseñas no coinciden.");
 
@@ -60,7 +67,7 @@ export default function RegisterScreen({ onLogin, onGo }) {
       <AuthBtn onClick={submit} loading={loading}>Crear cuenta</AuthBtn>
       <AuthSwitch>
         ¿Ya tienes cuenta?{" "}
-        <span onClick={onGo} style={s.authLink}>Inicia sesión</span>
+        <span className={CLS.link} onClick={onGo} style={s.authLink}>Inicia sesión</span>
       </AuthSwitch>
     </AuthShell>
   );

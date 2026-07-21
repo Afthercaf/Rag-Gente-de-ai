@@ -1,4 +1,4 @@
-import { s, MUTED } from "../../styles/theme";
+import { s, MUTED, CLS } from "../../styles/theme";
 
 /** Contenedor centrado con logo para las pantallas de auth */
 export function AuthShell({ title, subtitle, children }) {
@@ -11,7 +11,7 @@ export function AuthShell({ title, subtitle, children }) {
           <div style={s.logoName}>Pizzería 220</div>
           <div style={{ ...s.logoSub, textAlign: "center" }}>{subtitle}</div>
         </div>
-        <div style={s.authCard}>
+        <div className={CLS.authCard} style={s.authCard}>
           <div style={s.authTitle}>{title}</div>
           {children}
         </div>
@@ -40,7 +40,7 @@ export function Field({ label, type = "text", value, onChange, placeholder, onEn
 /** Fila de dos columnas */
 export function Row({ children }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+    <div className="p220-row-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
       {children}
     </div>
   );
@@ -50,6 +50,7 @@ export function Row({ children }) {
 export function AuthBtn({ onClick, loading, children }) {
   return (
     <button
+      className={CLS.authSubmit}
       onClick={onClick}
       disabled={loading}
       style={{ ...s.authSubmit, opacity: loading ? 0.6 : 1 }}
@@ -62,7 +63,7 @@ export function AuthBtn({ onClick, loading, children }) {
 /** Enlace de navegación entre Login / Register */
 export function AuthSwitch({ children }) {
   return (
-    <p style={{ textAlign: "center", fontSize: 13, color: MUTED, marginTop: 14 }}>
+    <p style={{ textAlign: "center", fontSize: 13, color: MUTED, marginTop: 14, lineHeight: 1.6 }}>
       {children}
     </p>
   );
