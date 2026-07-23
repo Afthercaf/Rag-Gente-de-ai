@@ -6,6 +6,7 @@ python-dotenv==1.1.1
 requests>=2.32.5,<3
 urllib3==2.5.0
 httpx==0.28.1
+certifi>=2025.0.0,<2026
 
 # IA & RAG
 langchain>=0.3.27,<0.4
@@ -30,12 +31,16 @@ python-telegram-bot==22.3
 # Database
 supabase==2.15.3
 
+# BM25 for hybrid search
+rank-bm25>=0.2.2,<0.3
+
 # Utilities
 aiofiles==24.1.0
 fpdf2>=2.7.0,<3.0
 # ============================================================
-# NUEVAS DEPENDENCIAS - Jina Embeddings + Qdrant
+# Embeddings LOCALES (sentence-transformers) + Qdrant
+# Sin dependencias de Jina ni APIs externas de embeddings.
 # ============================================================
+sentence-transformers>=3.0,<4
 qdrant-client>=1.13.0,<2.0
 langchain-qdrant>=0.2.0,<0.3
-backoff>=2.2.0,<3.0

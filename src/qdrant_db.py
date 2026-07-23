@@ -17,14 +17,20 @@ __all__ = ["QdrantVectorStoreWrapper"]
 class QdrantVectorStoreWrapper:
     """Conexión a Qdrant Cloud"""
 
-    def __init__(self, collection_name: str = "pizzeria_docs", vector_size: int = 1024):
+    def __init__(self, collection_name: str = "pizzeria_docs", vector_size: int | None = None):
         self.url = os.getenv("QDRANT_URL")
         self.api_key = os.getenv("QDRANT_API_KEY")
         self.collection_name = collection_name
-        # Jina Embeddings v3 devuelve vectores de 1024 dimensiones
-        # (ver EmbeddingProvider._embedding_size). Si cambiás de modelo
-        # de embeddings, actualizá este valor.
-        self.vector_size = vector_size
+        # El tamaño del vector se deduce del modelo de embeddings LOCAL en
+        # uso (ya no se hardcodea 1024, que era el tamaño de Jina). Si no
+        # se pasa, se infiere del proveedor de embeddings configurado.
+        if vector_size is None:
+            try:
+                from services.provider_service import provider_service
+                vector_size = provider_service.embedding_provider.dimension()
+            except Exception:
+                vector_size = 1024
+        self.vector_size = int(vector_size)
 
         if not self.url or not self.api_key:
             raise ValueError("QDRANT_URL y QDRANT_API_KEY son requeridas")

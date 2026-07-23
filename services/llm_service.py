@@ -1,6 +1,5 @@
 import re
 import asyncio
-import logging
 from typing import Any
 from datetime import datetime
 
@@ -25,18 +24,147 @@ from services.payment_handler import (
 )
 
 
+def _normalize_reference_text(value: str) -> str:
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", str(value or "").lower())
+    normalized = "".join(
+        char for char in normalized
+        if not unicodedata.combining(char)
+    )
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _resolve_contextual_pizza_question(
+    question: str,
+    history: list[dict],
+    pizza_names: list[str],
+) -> str:
+    """Convierte referencias como ``esa pizza`` en un pedido explícito.
+
+    Ejemplo:
+        Historial: "La Pizza Margarita lleva..."
+        Pregunta: "¿Me puede dar esa pizza?"
+        Resultado: "Quiero una Pizza Margarita"
+
+    Esta resolución ocurre antes de build_directive para que el flujo normal
+    cree y persista el carrito del usuario.
+    """
+    normalized = _normalize_reference_text(question)
+
+    order_reference = bool(re.search(
+        r"\b(?:"
+        r"me\s+puede(?:s)?\s+dar|"
+        r"me\s+das|"
+        r"dame|"
+        r"quiero|"
+        r"quisiera|"
+        r"me\s+gustaria|"
+        r"pedir|"
+        r"ordenar"
+        r")\b",
+        normalized,
+    )) and bool(re.search(
+        r"\b(?:esa|esta|la\s+misma)(?:\s+pizza)?\b",
+        normalized,
+    ))
+
+    if not order_reference:
+        return question
+
+    # El historial de session_service guarda cada intercambio como:
+    # {"user": "...", "assistant": "..."}.
+    # También aceptamos otros formatos para mantener compatibilidad.
+    for message in reversed(history[-12:]):
+        if not isinstance(message, dict):
+            continue
+
+        contents = [
+            message.get("assistant"),
+            message.get("user"),
+            message.get("content"),
+            message.get("text"),
+            message.get("message"),
+        ]
+
+        for raw_content in contents:
+            if not raw_content:
+                continue
+
+            normalized_content = _normalize_reference_text(raw_content)
+
+            # Preferir nombres más largos para evitar coincidencias parciales.
+            for pizza_name in sorted(pizza_names, key=len, reverse=True):
+                clean_name = re.sub(
+                    r"^pizza\s+",
+                    "",
+                    _normalize_reference_text(pizza_name),
+                ).strip()
+
+                if not clean_name:
+                    continue
+
+                if re.search(
+                    rf"\b(?:pizza\s+)?{re.escape(clean_name)}\b",
+                    normalized_content,
+                ):
+                    display_name = re.sub(
+                        r"^pizza\s+",
+                        "",
+                        str(pizza_name),
+                        flags=re.IGNORECASE,
+                    ).strip()
+
+                    print(
+                        "🔗 [REFERENCIA] "
+                        f"'{question}' resuelto como Pizza {display_name}"
+                    )
+                    return f"Quiero una Pizza {display_name}"
+
+    return question
+
+
 async def generate_response(
     context: str,
     history_text: str,
     question: str,
     history: list[dict] | None = None,
+    *,
+    session: dict | None = None,
+    user_id: int = 0,
 ) -> str:
 
     if history is None:
         history = []
 
     pizza_names = rag_service.get_pizza_names()
+
+    # Resolver "esa pizza" usando la conversación previa antes de detectar
+    # intención, productos y precios.
+    question = _resolve_contextual_pizza_question(
+        question,
+        history,
+        pizza_names,
+    )
+
     extras_context = rag_service.get_available_extras_context()
+    promos_text = rag_service.get_promos_text()
+
+    # Estado aislado del carrito por usuario. La sesión debe venir de
+    # get_user_session(user_id) en chat.py.
+    current_cart = None
+    last_order = None
+    if session is not None:
+        from services.session_service import get_current_cart, get_last_order, set_current_cart
+        current_cart = get_current_cart(session, user_id)
+        if current_cart is None:
+            current_cart = {
+                "user_id": user_id, "status": "idle", "cursor": 0,
+                "items": [], "observations": [],
+            }
+            set_current_cart(session, user_id, current_cart)
+        last_order = get_last_order(session, user_id)
+    best_seller = rag_service.get_best_seller()
 
     # ── LOG DIAGNÓSTICO: extras_context ─────────────────────────
     print(f"\n🧩 [LOG EXTRAS] --- DIAGNÓSTICO DE EXTRAS_CONTEXT ---")
@@ -47,16 +175,41 @@ async def generate_response(
         print(f"⚠️ [LOG EXTRAS] extras_context está VACÍO o es None: {extras_context!r}")
         print(f"⚠️ [LOG EXTRAS] -> rag_service.get_available_extras_context() no devolvió nada.")
 
-    # ── LOG DIAGNÓSTICO: precios en el contexto RAG ──────────────
-    import re as _re
-    _ctx_prices = _re.findall(r'\$\s*(\d+(?:[.,]\d{1,2})?)', context)
-    print(f"💰 [LOG CONTEXT] Precios encontrados en el contexto RAG: {_ctx_prices}")
-
     # ── OBTENER TOTAL DEL ÚLTIMO PEDIDO (para pago) ──────────────
     total = _extract_last_total(history)
     order_id = _extract_last_order_id(history) or f"PED-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     print(f"💰 [LOG PAGO] Total del último pedido: {total}")
     print(f"📦 [LOG PAGO] Order ID: {order_id}")
+
+    # ── ESTADO DE PAGO EN EFECTIVO CONTROLADO POR SESIÓN ─────────
+    # Mercado Pago se conserva como opción final; el flujo en efectivo se
+    # resuelve aquí para que una cantidad como "1200" no caiga al fallback.
+    if current_cart and current_cart.get("status") == "awaiting_payment":
+        qn = question.strip().lower()
+
+        if "efectivo" in qn:
+            current_cart["status"] = "awaiting_location"
+            current_cart["payment_method"] = "efectivo"
+            return (
+                "📍 Para completar tu pedido, necesito tu ubicación exacta.\n"
+                "📍 Compartir mi ubicación"
+            )
+
+        if "mercado pago" in qn or "mercadopago" in qn:
+            current_cart["payment_method"] = "mercado_pago"
+            # El procesamiento existente de Mercado Pago continúa debajo.
+        else:
+            return (
+                "💳 ¿Cómo deseas pagar?\n"
+                "• Efectivo\n"
+                "• Mercado Pago"
+            )
+
+    if current_cart and current_cart.get("status") == "awaiting_location":
+        return (
+            "📍 Para completar tu pedido, comparte tu ubicación exacta.\n"
+            "📍 Compartir mi ubicación"
+        )
 
     # ── DETECTAR INTENCIÓN DE PAGO DINÁMICA ──────────────────────
     payment_intent = detect_payment_intent(question)
@@ -82,7 +235,7 @@ async def generate_response(
 
             # Procesar pago con Mercado Pago o Efectivo
             payment_result = handle_payment_in_chat(
-                user_id=0,  # Se puede obtener del contexto si está disponible
+                user_id=user_id,
                 order_id=order_id,
                 amount=amount,
                 description=f"Pedido {order_id} - {_extract_product_name(history)}",
@@ -144,6 +297,11 @@ Total a pagar: **{total if total else "Consultando..."}**
             history,
             extras_context=extras_context,
             context=context,
+            promos_text=promos_text,
+            current_cart=current_cart,
+            best_seller=best_seller,
+            last_order=last_order,
+            user_id=user_id,
         )
         print(f"📋 [LOG EXTRAS] Directive generada para el LLM:\n{directive}\n")
 
@@ -206,6 +364,19 @@ Total a pagar: **{total if total else "Consultando..."}**
     )
 
     raw_response = response.content.strip()
+
+    # Bloqueo de fuga de prompt/información interna y respuestas absurdas.
+    leak_markers = (
+        "system prompt", "developer message", "estructura de tu base de datos",
+        "<historial_conversacion>", "instrucciones internas", "```python",
+        "print(\"hola, mundo", "print('hola, mundo",
+    )
+    normalized_output = raw_response.lower()
+    if any(marker in normalized_output for marker in leak_markers):
+        return (
+            "No puedo proporcionar información interna del sistema. "
+            "Puedo ayudarte con el menú, precios o un pedido."
+        )
 
     # ── VALIDACIÓN POST-RESPUESTA ───────────────────────────────
     # Si la respuesta contiene precios inventados, marcarlos
@@ -324,49 +495,36 @@ def _process_payment_response(
 def _validate_extras_prices(response: str, full_context: str) -> str:
     """
     Valida que los precios mencionados en la respuesta existan en el contexto.
-    Normaliza los precios a float para evitar falsos positivos por diferencias
-    de formato (ej. "105" vs "105.00").
+    Si no, los elimina o los marca.
     """
     # Extraer todos los precios de la respuesta
-    price_pattern = r'\$\s*(\d+(?:[.,]\d{1,2})?)'
-    response_price_strs = re.findall(price_pattern, response)
-
-    if not response_price_strs:
+    price_pattern = r'\$\s*(\d+(?:\.\d{2})?)'
+    response_prices = re.findall(price_pattern, response)
+    
+    if not response_prices:
         return response
-
-    def to_float(s: str) -> float:
-        return float(s.replace(",", "."))
-
-    # Extraer precios válidos del contexto y normalizarlos
-    context_price_strs = re.findall(price_pattern, full_context)
-    valid_prices_float = set(to_float(p) for p in context_price_strs)
-
-    print(f"💰 [PRICE_VALIDATOR] Precios en respuesta: {response_price_strs}")
-    print(f"💰 [PRICE_VALIDATOR] Precios válidos del contexto: {sorted(valid_prices_float)}")
-
-    # Detectar precios en la respuesta que NO existen en el contexto
-    invalid_price_strs = [
-        p for p in response_price_strs
-        if to_float(p) not in valid_prices_float
-    ]
-
-    if invalid_price_strs:
-        print(f"⚠️ [PRICE_VALIDATOR] Precios INVÁLIDOS detectados: {invalid_price_strs}")
+    
+    # Extraer precios válidos del contexto
+    valid_prices = re.findall(price_pattern, full_context)
+    valid_prices_set = set(valid_prices)
+    
+    # Si hay precios en la respuesta que no están en el contexto
+    invalid_prices = [p for p in response_prices if p not in valid_prices_set]
+    
+    if invalid_prices:
+        # Opción 1: Eliminar líneas con precios inválidos
         lines = response.split('\n')
         cleaned_lines = []
         for line in lines:
-            for price in invalid_price_strs:
+            # Si la línea tiene un precio inválido, omitirla o reemplazarla
+            for price in invalid_prices:
                 if f'${price}' in line or f'$ {price}' in line:
-                    print(f"🚫 [PRICE_VALIDATOR] Reemplazando precio inválido '${price}' en línea: {line!r}")
                     line = line.replace(f'${price}', '[precio no disponible]')
                     line = line.replace(f'$ {price}', '[precio no disponible]')
             cleaned_lines.append(line)
         response = '\n'.join(cleaned_lines)
-    else:
-        print(f"✅ [PRICE_VALIDATOR] Todos los precios son válidos — sin cambios.")
-
+    
     return response
-
 
 
 def _extract_field(raw: str, name: str) -> str | None:
@@ -405,23 +563,38 @@ def _parse_order_section(raw: str) -> dict[str, Any]:
     producto = _extract_field(raw, "Producto")
     tamaño = _extract_field(raw, "Tamaño")
     extras = _extract_field(raw, "Extras")
-    removidos = _extract_field(raw, "Ingredientes removidos")
+    observaciones = _extract_field(raw, "Observaciones")
     total = _extract_total(raw) or _extract_field(raw, "Total")
+    products_block = _extract_field(raw, "Productos")
+
+    products = []
+    if products_block:
+        for line in products_block.splitlines():
+            match = re.search(
+                r"^\s*[^\d]*?(\d+)\s*(?:x|×)\s*Pizza\s+(.+?)(?:\s+(?:—|-)\s+|\s*$)",
+                line,
+                re.IGNORECASE,
+            )
+            if match:
+                products.append({"cantidad": int(match.group(1)), "producto": match.group(2).strip()})
+        if products and not producto:
+            producto = ", ".join(
+                f"{item['cantidad']} Pizza {item['producto']}" for item in products
+            )
+        if products and not cantidad:
+            cantidad = str(sum(item["cantidad"] for item in products))
 
     parsed_extras = None
     if extras:
         parsed_extras = [item.strip() for item in re.split(r",| y ", extras) if item.strip()]
 
-    parsed_removidos = None
-    if removidos:
-        parsed_removidos = [item.strip() for item in re.split(r",| y ", removidos) if item.strip()]
-
     return {
         "cantidad": cantidad,
         "producto": producto,
+        "productos": products or None,
         "tamaño": tamaño,
         "extras": parsed_extras,
-        "ingredientes_removidos": parsed_removidos,
+        "observaciones": observaciones,
         "total": total,
     }
 
@@ -436,14 +609,13 @@ def extract_order_details(content: str) -> tuple[bool, dict[str, Any] | None]:
     Returns:
         tuple[bool, dict | None]: (is_order, order_details)
     """
-    is_order = "📝 PEDIDO:" in content
+    is_order = bool(re.search(r"(?m)^\s*(?:\W+\s*)?PEDIDO:\s*", content))
     order_details = None
 
     if is_order:
         match = re.search(
-            r"📝\s*PEDIDO:\s*(.*)",
+            r"(?ms)^\s*(?:\W+\s*)?PEDIDO:\s*(.*)",
             content,
-            re.DOTALL,
         )
 
         if match:

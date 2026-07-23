@@ -33,6 +33,7 @@ state: Dict[str, Any] = {
     "ready": False,
     "loading_task": None,
     "embedding_model": None,
+    "menu_loaded": False,
     "startup_time": time.time(),
     "model_loader": LazyModelLoader(),
 }

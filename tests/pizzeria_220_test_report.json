@@ -1,0 +1,338 @@
+{
+  "generated_at": "2026-07-23 05:10:22",
+  "summary": {
+    "live_total": 27,
+    "live_passed": 0,
+    "live_failed": 27,
+    "history_total": 0,
+    "history_passed": 0,
+    "history_failed": 0
+  },
+  "live_results": [
+    {
+      "scenario": "bienvenida",
+      "step": "saludo inicial",
+      "user_id": 24099341,
+      "message": "hola",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "menú",
+      "step": "solicitud explícita",
+      "user_id": 24099342,
+      "message": "Muéstrame el menú",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "producto inválido",
+      "step": "pizza inexistente",
+      "user_id": 24099343,
+      "message": "Quiero una pizza Superpizza",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "límite de cantidad",
+      "step": "más de 20 pizzas",
+      "user_id": 24099344,
+      "message": "Quiero 9,999 pizzas Campiranas con queso extra y orilla de queso",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "más vendida",
+      "step": "consulta",
+      "user_id": 24099345,
+      "message": "¿Cuál es la pizza más vendida?",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "referencia contextual",
+      "step": "consultar ingredientes",
+      "user_id": 24099346,
+      "message": "¿Qué tiene Pizza Margarita?",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "referencia contextual",
+      "step": "ordenar esa pizza",
+      "user_id": 24099346,
+      "message": "¿Me puede dar esa pizza?",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "referencia contextual",
+      "step": "sin extras",
+      "user_id": 24099346,
+      "message": "ninguno",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "referencia contextual",
+      "step": "cancelar",
+      "user_id": 24099346,
+      "message": "cancelar",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido individual",
+      "step": "selección",
+      "user_id": 24099347,
+      "message": "Pizza Margarita",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido individual",
+      "step": "ningún extra",
+      "user_id": 24099347,
+      "message": "no",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido individual",
+      "step": "confirmación",
+      "user_id": 24099347,
+      "message": "sí, esto es todo",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido individual",
+      "step": "efectivo",
+      "user_id": 24099347,
+      "message": "efectivo",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "todos los extras",
+      "step": "selección",
+      "user_id": 24099348,
+      "message": "Quiero una Pizza Pepperoni",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "todos los extras",
+      "step": "con todo",
+      "user_id": 24099348,
+      "message": "con todo",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "todos los extras",
+      "step": "cancelar",
+      "user_id": 24099348,
+      "message": "ya no quiero nada",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido masivo",
+      "step": "20 pizzas agrupadas",
+      "user_id": 24099349,
+      "message": "Quiero 20 pizzas: 4 Margaritas, 4 Pepperoni, 4 Mexicanas, 4 Pastoreras y 4 Campiranas. A las 20 agrégales queso extra y orilla de queso. Además quiero 20 Coca-Cola de 1.35 L.",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido masivo",
+      "step": "confirmar",
+      "user_id": 24099349,
+      "message": "confirmar",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "pedido masivo",
+      "step": "efectivo",
+      "user_id": 24099349,
+      "message": "efectivo",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "cancelación",
+      "step": "iniciar pedido",
+      "user_id": 24099350,
+      "message": "Quiero una Pizza Pastorera",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "cancelación",
+      "step": "cancelar flujo",
+      "user_id": 24099350,
+      "message": "ya no quiero nada",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "cancelación",
+      "step": "consulta posterior",
+      "user_id": 24099350,
+      "message": "¿Qué tiene Pizza Margarita?",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "multiusuario",
+      "step": "usuario A inicia Margarita",
+      "user_id": 24099351,
+      "message": "Pizza Margarita",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "multiusuario",
+      "step": "usuario B inicia Campirana",
+      "user_id": 24099352,
+      "message": "Pizza Campirana",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "multiusuario",
+      "step": "usuario A continúa sin extras",
+      "user_id": 24099351,
+      "message": "ninguno",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "multiusuario",
+      "step": "usuario B continúa sin extras",
+      "user_id": 24099352,
+      "message": "ninguno",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    },
+    {
+      "scenario": "fuera de dominio",
+      "step": "clima",
+      "user_id": 24099353,
+      "message": "Quiero que me digas el clima",
+      "passed": false,
+      "reply": "",
+      "reason": "No se pudo conectar con http://127.0.0.1:8000. Verifica que Uvicorn esté ejecutándose.",
+      "response": {
+        "reply": ""
+      }
+    }
+  ],
+  "history_audit": []
+}

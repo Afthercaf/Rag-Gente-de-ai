@@ -125,6 +125,52 @@ def get_order_status(order_id: str) -> str:
         return "desconocido"
 
 
+def _get_all_orders(limit: int = 1000) -> list[dict]:
+    """Obtiene órdenes para estadísticas de ventas.
+
+    La tabla ``ordenes`` no tiene una columna ``producto``. El detalle del
+    pedido se conserva principalmente en ``pedido`` y, para registros nuevos,
+    puede complementarse con ``pizza``, ``extras`` y ``cantidad``.
+
+    Esta función degrada a una lista vacía si Supabase no está disponible.
+    """
+    try:
+        safe_limit = max(1, min(int(limit), 5000))
+
+        select_fields = (
+            "id,user_id,pedido,pizza,extras,cantidad,total,"
+            "estado,created_at"
+        )
+
+        response = SESSION.get(
+            f"{SUPABASE_URL}/rest/v1/ordenes"
+            f"?select={select_fields}"
+            f"&estado=neq.cancelado"
+            f"&order=created_at.desc"
+            f"&limit={safe_limit}",
+            headers=HEADERS,
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            return data if isinstance(data, list) else []
+
+        logger.warning(
+            "No se pudieron leer órdenes. Status=%s Body=%s",
+            response.status_code,
+            response.text,
+        )
+        return []
+
+    except (TypeError, ValueError):
+        logger.warning("Límite inválido en _get_all_orders: %r", limit)
+        return []
+    except Exception as e:
+        logger.error(f"Error en _get_all_orders: {e}")
+        return []
+
+
 def get_order_by_id(order_id: str) -> Optional[dict]:
     """Obtiene una orden completa por ID."""
     try:

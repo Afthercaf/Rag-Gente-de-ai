@@ -7,6 +7,7 @@ import logging
 from core.state import state
 from schemas.order import OrderRequest, StatusUpdateRequest
 from services import order_service
+from services.session_service import get_user_session, clear_current_cart
 from core.decorators import measure_time
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,22 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
         logger.info(f"📦 [create_new_order] Resultado de place_order: {result}")
 
         if result["success"]:
+            # La orden ya quedó persistida: cerrar el flujo conversacional.
+            # Así una pregunta posterior no reutiliza el carrito anterior.
+            try:
+                session = get_user_session(req.user_id)
+                clear_current_cart(session, req.user_id)
+                logger.info(
+                    "🧹 [create_new_order] Carrito conversacional limpiado para user_id=%s",
+                    req.user_id,
+                )
+            except Exception as session_error:
+                logger.warning(
+                    "No se pudo limpiar el carrito del usuario %s: %s",
+                    req.user_id,
+                    session_error,
+                )
+
             # Enviar notificación por Telegram en segundo plano
             background_tasks.add_task(
                 order_service.notify_telegram,
