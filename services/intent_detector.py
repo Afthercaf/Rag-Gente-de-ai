@@ -2141,6 +2141,61 @@ def _recover_collecting_cart_from_history(
         or "puedes responder ninguno" in normalized
         or "ahora configuraremos los extras de la pizza" in normalized
     )
+
+    waiting_for_any_extras = (
+        "deseas agregar extras a alguna de las pizzas" in normalized
+        or (
+            "selecciona si" in normalized
+            and "continuar sin extras" in normalized
+        )
+    )
+
+    if waiting_for_any_extras:
+        pizza_catalog, _, _ = _formatted_menu_catalog()
+        recovered_items: list[dict] = []
+
+        for quantity_raw, pizza_raw in re.findall(
+            r"[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n]+)",
+            last_assistant,
+            re.IGNORECASE,
+        ):
+            clean_name = pizza_raw.strip()
+            matched_name = None
+            matched_price = None
+
+            for catalog_name, catalog_price in pizza_catalog.items():
+                if _normalize(catalog_name) == _normalize(clean_name):
+                    matched_name = catalog_name
+                    matched_price = float(catalog_price)
+                    break
+
+            if matched_name is None or matched_price is None:
+                continue
+
+            recovered_items.append({
+                "pizza": matched_name,
+                "base_price": matched_price,
+                "quantity": int(quantity_raw),
+                "extras": [],
+                "beverages": [],
+                "observation": "",
+            })
+
+        if recovered_items:
+            recovered = current_cart if isinstance(current_cart, dict) else {}
+            previous_owner = recovered.get("user_id")
+            owner_id = user_id or previous_owner or 0
+
+            recovered.clear()
+            recovered.update({
+                "status": "asking_any_extras",
+                "items": recovered_items,
+                "cursor": 0,
+                "beverages": [],
+                "user_id": owner_id,
+            })
+            return recovered
+
     if not waiting_for_extras:
         return current_cart
 

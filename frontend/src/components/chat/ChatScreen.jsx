@@ -399,6 +399,7 @@
 
 
 
+
 import { useState, useRef, useEffect } from "react";
 import { sendChat, placeOrder } from "../../api/chat";
 import { logout } from "../../api/auth";
@@ -411,6 +412,15 @@ import { MessageBubble } from "./MessageBubble";
 import OrderStep from "./OrderStep";
 import { TypingIndicator, SendIcon } from "./ChatUIElements";
 import LocationPicker from "./LocationPicker";
+
+const AVAILABLE_EXTRAS = [
+  { name: "Queso extra", price: "$45.00 MXN" },
+  { name: "Orilla de queso", price: "$50.00 MXN" },
+  { name: "Pepperoni", price: "$45.00 MXN" },
+  { name: "Pimiento", price: "$45.00 MXN" },
+  { name: "Cebolla", price: "$45.00 MXN" },
+  { name: "Aceitunas y atún", price: "$45.00 MXN" },
+];
 
 export default function ChatScreen({ user, onLogout }) {
   // LOG INICIAL: Para ver qué usuario está cargando la pantalla
@@ -492,6 +502,7 @@ export default function ChatScreen({ user, onLogout }) {
     const newMsg = { id: nextId(), role, text, ...extra };
     if (requiresAction && role === "bot") newMsg.requiresLocation = true;
     setMessages((m) => [...m, newMsg]);
+    return newMsg;
   };
 
   const { status: orderStatus, label: orderLabel, isDone } = useOrderStatus(activeOrderId);
@@ -582,6 +593,19 @@ export default function ChatScreen({ user, onLogout }) {
     );
   };
 
+  const isTargetedExtrasPrompt = (reply = "") => {
+    const normalized = String(reply || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return (
+      normalized.includes("indica a cuales pizzas deseas agregar extras") &&
+      normalized.includes("cuantas unidades") &&
+      normalized.includes("cuales extras")
+    );
+  };
+
   const extractRegisteredProducts = (reply = "") => {
     const products = [];
     const regex = /[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n]+)/gi;
@@ -607,25 +631,22 @@ export default function ChatScreen({ user, onLogout }) {
 
   const handleExtrasDecision = (decision, msg) => {
     markActionHandled(msg.id);
-
-    if (decision === "no") {
-      setExtrasPrompt(null);
-      setExtrasInput("");
-      setInputHint("");
-      sendMessage("no");
-      return;
-    }
-
-    setExtrasPrompt({
-      messageId: msg.id,
-      products: msg.extrasProducts || [],
-    });
+    setExtrasPrompt(null);
     setExtrasInput("");
+    setInputHint("");
+
+    // El backend debe recibir la decisión para pasar a
+    // awaiting_targeted_extras.
+    sendMessage(decision === "si" ? "sí" : "no");
   };
 
   const submitExtrasDescription = () => {
-    const value = extrasInput.trim();
-    if (!value) return;
+    const value = extrasInput
+      .trim()
+      .replace(/\bPizza\s+/gi, "")
+      .replace(/\s+/g, " ");
+
+    if (!value || loading) return;
 
     setExtrasPrompt(null);
     setExtrasInput("");
@@ -673,18 +694,28 @@ export default function ChatScreen({ user, onLogout }) {
 
       const locationPrompt = isLocationPrompt(data.reply, data);
       const extrasDecisionPrompt = isExtrasDecisionPrompt(data.reply);
-      const extrasProducts = extrasDecisionPrompt
-        ? extractRegisteredProducts(data.reply)
-        : [];
+      const targetedExtrasPrompt = isTargetedExtrasPrompt(data.reply);
+      const extrasProducts =
+        extrasDecisionPrompt || targetedExtrasPrompt
+          ? extractRegisteredProducts(data.reply)
+          : [];
       const orderConfirmationPrompt =
         data.is_order === true && isOrderDraft(data.reply);
 
       // Agregamos metadatos de acciones para mostrar botones en el frontend.
-      addMsg("bot", data.reply, locationPrompt, {
+      const botMessage = addMsg("bot", data.reply, locationPrompt, {
         requiresExtrasDecision: extrasDecisionPrompt,
         extrasProducts,
         requiresOrderConfirmation: orderConfirmationPrompt,
       });
+
+      if (targetedExtrasPrompt) {
+        setExtrasPrompt({
+          messageId: botMessage?.id || Date.now(),
+          products: extrasProducts,
+        });
+        setExtrasInput("");
+      }
 
       const paymentPrompt =
         data.payment_required === true ||
@@ -1100,7 +1131,10 @@ ${
                 {msg.requiresExtrasDecision &&
                   !loading &&
                   !handledActionMessages.includes(msg.id) && (
-                    <div className="p220-msg-action p220-extras-decision-row">
+                    <div
+                      className="p220-msg-action"
+                      style={{ display: "flex", gap: 10 }}
+                    >
                       <button
                         type="button"
                         className="p220-opt-btn is-active"
@@ -1122,7 +1156,10 @@ ${
                 {msg.requiresOrderConfirmation &&
                   !loading &&
                   !handledActionMessages.includes(msg.id) && (
-                    <div className="p220-msg-action p220-extras-decision-row">
+                    <div
+                      className="p220-msg-action"
+                      style={{ display: "flex", gap: 10 }}
+                    >
                       <button
                         type="button"
                         className="p220-opt-btn is-active"
@@ -1150,7 +1187,7 @@ ${
                 </div>
 
                 {extrasPrompt.products.length > 0 && (
-                  <div className="p220-extras-products-list">
+                  <div style={{ marginBottom: 10, fontSize: 13, opacity: 0.82 }}>
                     {extrasPrompt.products.map((product) => (
                       <div key={product.name}>
                         • {product.quantity} × Pizza {product.name}
@@ -1159,8 +1196,39 @@ ${
                   </div>
                 )}
 
-                <div className="p220-extras-hint">
+                <div style={{ marginBottom: 8, fontSize: 13 }}>
                   Escribe cuáles pizzas, cuántas unidades y qué extras deseas.
+                </div>
+
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: 10,
+                    borderRadius: 10,
+                    background: "rgba(0, 0, 0, 0.04)",
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    Extras disponibles
+                  </div>
+
+                  {AVAILABLE_EXTRAS.map((extra) => (
+                    <div
+                      key={extra.name}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        marginBottom: 3,
+                      }}
+                    >
+                      <span>• {extra.name}</span>
+                      <span style={{ whiteSpace: "nowrap" }}>
+                        {extra.price}
+                      </span>
+                    </div>
+                  ))}
                 </div>
 
                 <div className="p220-order-input-row">
@@ -1182,7 +1250,7 @@ ${
                   <button
                     type="button"
                     onClick={submitExtrasDescription}
-                    disabled={!extrasInput.trim()}
+                    disabled={!extrasInput.trim() || loading}
                     className="p220-order-submit"
                   >
                     →
@@ -1191,7 +1259,8 @@ ${
 
                 <button
                   type="button"
-                  className="p220-opt-btn p220-extras-skip-btn"
+                  className="p220-opt-btn"
+                  style={{ marginTop: 10 }}
                   onClick={() =>
                     handleExtrasDecision("no", {
                       id: extrasPrompt.messageId,
@@ -1215,11 +1284,14 @@ ${
           {!orderForm && (
             <>
               {inputHint && (
-                <div className="p220-order-card p220-input-hint-card">
+                <div
+                  className="p220-order-card"
+                  style={{ margin: "0 16px 10px" }}
+                >
                   <div className="p220-order-label">
                     Modifica tu pedido
                   </div>
-                  <div className="p220-input-hint-text">
+                  <div style={{ fontSize: 13 }}>
                     {inputHint}
                   </div>
                 </div>
