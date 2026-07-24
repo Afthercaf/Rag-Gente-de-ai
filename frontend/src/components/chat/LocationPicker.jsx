@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { s, CLS } from '../../styles/theme';
+import '../../styles/theme.css';
 
 export default function LocationPicker({ onLocationSelect, onClose }) {
   const [loading, setLoading] = useState(false);
@@ -120,15 +120,14 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
   }, []);
 
   return (
-    <div className="p220-loc-overlay" style={s.locOverlay}>
-      <div className={CLS.locModal} style={s.locModal}>
+    <div className="p220-loc-overlay">
+      <div className="p220-loc-modal">
 
         {/* Header */}
-        <div style={s.locHeader}>
-          <span style={s.locTitle}>📍 Selecciona tu ubicación</span>
+        <div className="p220-loc-header">
+          <span className="p220-loc-title">📍 Selecciona tu ubicación</span>
           <button
-            className={CLS.closeBtn}
-            style={s.locCloseBtn}
+            className="p220-close-btn"
             onClick={() => { if (!loading && !hasSelected.current) onClose(); }}
             disabled={loading}
           >
@@ -137,12 +136,12 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
         </div>
 
         {/* Body */}
-        <div style={s.locBody}>
+        <div className="p220-loc-body">
 
           {/* Botón GPS */}
           <button
-            className={CLS.gpsBtn}
-            style={{ ...s.locGpsBtn, opacity: loading || hasSelected.current ? 0.5 : 1 }}
+            className="p220-gps-btn"
+            style={{ opacity: loading || hasSelected.current ? 0.5 : 1 }}
             onClick={getCurrentLocation}
             disabled={loading || hasSelected.current}
           >
@@ -150,15 +149,13 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
           </button>
 
           {/* Búsqueda manual */}
-          <div style={s.locSearchRow}>
+          <div className="p220-loc-search-row">
             <input
               ref={searchInputRef}
               type="text"
               placeholder="O escribe tu dirección (ej: Calle Principal 123)"
-              style={{
-                ...s.locSearchInput,
-                opacity: loading || hasSelected.current ? 0.5 : 1,
-              }}
+              className="p220-loc-search-input"
+              style={{ opacity: loading || hasSelected.current ? 0.5 : 1 }}
               disabled={loading || hasSelected.current}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !loading && !hasSelected.current) {
@@ -167,8 +164,7 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
               }}
             />
             <button
-              className={CLS.searchBtn}
-              style={s.locSearchBtn}
+              className="p220-search-btn"
               disabled={loading || hasSelected.current}
               onClick={() => {
                 if (searchInputRef.current?.value && !loading && !hasSelected.current) {
@@ -182,20 +178,20 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
 
           {/* Error */}
           {error && (
-            <div style={s.locError}>⚠️ {error}</div>
+            <div className="p220-loc-error">⚠️ {error}</div>
           )}
 
           {/* Dirección seleccionada */}
           {address && (
-            <div style={s.locAddressCard}>
-              <p style={s.locAddressLabel}>📍 Dirección seleccionada:</p>
-              <p style={s.locAddressText}>{address}</p>
+            <div className="p220-loc-address-card">
+              <p className="p220-loc-address-label">📍 Dirección seleccionada:</p>
+              <p className="p220-loc-address-text">{address}</p>
             </div>
           )}
 
           {/* Coordenadas */}
           {coordinates && (
-            <div style={s.locCoordsCard}>
+            <div className="p220-loc-coords-card">
               📌 Coordenadas: {coordinates.lat.toFixed(6)}, {coordinates.lng.toFixed(6)}
             </div>
           )}
@@ -205,19 +201,15 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
             <img
               src={`https://maps.locationiq.com/v3/staticmap?key=pk.5879fbb593bcbb0fea2d04f86e8933b8&center=${coordinates.lat},${coordinates.lng}&zoom=16&size=400x200&markers=${coordinates.lat},${coordinates.lng}`}
               alt="Mapa de ubicación"
-              style={s.locMap}
+              className="p220-loc-map"
               onError={(e) => (e.target.style.display = 'none')}
             />
           )}
 
           {/* Confirmar */}
           <button
-            className={CLS.confirmBtn}
-            style={
-              hasSelected.current
-                ? s.locConfirmBtnDone
-                : { ...s.locConfirmBtn, opacity: !coordinates ? 0.5 : 1 }
-            }
+            className={`p220-confirm-btn${hasSelected.current ? ' is-done' : ''}`}
+            style={!hasSelected.current ? { opacity: !coordinates ? 0.5 : 1 } : undefined}
             onClick={handleConfirm}
             disabled={!coordinates || hasSelected.current}
           >

@@ -1,18 +1,18 @@
-import { s, MUTED, CLS } from "../../styles/theme";
+import '../../styles/theme.css';
 
 /** Contenedor centrado con logo para las pantallas de auth */
 export function AuthShell({ title, subtitle, children }) {
   return (
-    <div style={s.root}>
-      <div style={s.bgPattern} />
-      <div style={s.authWrap}>
-        <div style={s.authLogo}>
+    <div className="p220-auth-shell">
+      <div className="p220-bg-pattern" />
+      <div className="p220-auth-wrap">
+        <div className="p220-auth-logo">
           <span style={{ fontSize: 48 }}>🍕</span>
-          <div style={s.logoName}>Pizzería 220</div>
-          <div style={{ ...s.logoSub, textAlign: "center" }}>{subtitle}</div>
+          <div className="p220-logo-name">Pizzería 220</div>
+          <div className="p220-logo-sub" style={{ textAlign: "center" }}>{subtitle}</div>
         </div>
-        <div className={CLS.authCard} style={s.authCard}>
-          <div style={s.authTitle}>{title}</div>
+        <div className="p220-auth-card">
+          <div className="p220-auth-title">{title}</div>
           {children}
         </div>
       </div>
@@ -23,15 +23,15 @@ export function AuthShell({ title, subtitle, children }) {
 /** Input con etiqueta */
 export function Field({ label, type = "text", value, onChange, placeholder, onEnter }) {
   return (
-    <div style={s.fieldWrap}>
-      <label style={s.fieldLabel}>{label}</label>
+    <div className="p220-field-wrap">
+      <label className="p220-field-label">{label}</label>
       <input
+        className="p220-auth-input"
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && onEnter) onEnter(); }}
         placeholder={placeholder}
-        style={s.authInput}
       />
     </div>
   );
@@ -40,7 +40,7 @@ export function Field({ label, type = "text", value, onChange, placeholder, onEn
 /** Fila de dos columnas */
 export function Row({ children }) {
   return (
-    <div className="p220-row-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+    <div className="p220-row-2col">
       {children}
     </div>
   );
@@ -50,10 +50,9 @@ export function Row({ children }) {
 export function AuthBtn({ onClick, loading, children }) {
   return (
     <button
-      className={CLS.authSubmit}
+      className="p220-auth-submit"
       onClick={onClick}
       disabled={loading}
-      style={{ ...s.authSubmit, opacity: loading ? 0.6 : 1 }}
     >
       {loading ? "Cargando..." : children}
     </button>
@@ -63,7 +62,7 @@ export function AuthBtn({ onClick, loading, children }) {
 /** Enlace de navegación entre Login / Register */
 export function AuthSwitch({ children }) {
   return (
-    <p style={{ textAlign: "center", fontSize: 13, color: MUTED, marginTop: 14, lineHeight: 1.6 }}>
+    <p className="p220-auth-switch">
       {children}
     </p>
   );
@@ -71,5 +70,5 @@ export function AuthSwitch({ children }) {
 
 /** Caja de error */
 export function ErrorMsg({ children }) {
-  return <div style={s.errorMsg}>{children}</div>;
+  return <div className="p220-error-msg">{children}</div>;
 }

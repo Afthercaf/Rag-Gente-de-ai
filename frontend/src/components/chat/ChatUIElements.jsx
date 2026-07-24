@@ -1,14 +1,12 @@
-import { s, MUTED } from "../../styles/theme";
-
 /** Tres puntos animados mientras el bot responde. */
 export function TypingIndicator() {
   return (
-    <div style={s.msgRow}>
-      <span style={s.avatar}>🍕</span>
-      <div style={{ ...s.bubbleBot, ...s.typingBubble }}>
-        <span style={{ ...s.dot2, animationDelay: "0s"   }} />
-        <span style={{ ...s.dot2, animationDelay: ".18s" }} />
-        <span style={{ ...s.dot2, animationDelay: ".36s" }} />
+    <div className="p220-msg-row">
+      <span className="p220-avatar">🍕</span>
+      <div className="p220-bubble p220-bubble-bot p220-typing-bubble">
+        <span className="p220-dot" style={{ animationDelay: "0s" }} />
+        <span className="p220-dot" style={{ animationDelay: ".18s" }} />
+        <span className="p220-dot" style={{ animationDelay: ".36s" }} />
       </div>
     </div>
   );

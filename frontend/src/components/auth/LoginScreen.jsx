@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { login } from "../../api/auth";
-import { s } from "../../styles/theme";
-import { CLS } from "../../styles/theme";
 import {
   AuthShell,
   Field,
@@ -74,7 +72,7 @@ export default function LoginScreen({ onLogin, onGo }) {
 
       <AuthSwitch>
         ¿No tienes cuenta?{" "}
-        <span className={CLS.link} onClick={onGo} style={s.authLink}>
+        <span className="p220-auth-link" onClick={onGo}>
           Regístrate
         </span>
       </AuthSwitch>

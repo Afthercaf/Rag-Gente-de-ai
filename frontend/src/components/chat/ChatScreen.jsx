@@ -399,7 +399,6 @@
 
 
 
-
 import { useState, useRef, useEffect } from "react";
 import { sendChat, placeOrder } from "../../api/chat";
 import { logout } from "../../api/auth";
@@ -407,7 +406,7 @@ import { clearSession } from "../../utils/session";
 import { nextId, getOrderSteps } from "../../utils/orderUtils";
 import { useOrderStatus } from "../../hooks/useOrderStatus.js";
 import { useVoiceRecognition } from "../../hooks/useVoiceRecognition";
-import { s, CLS } from "../../styles/theme";
+import "../../styles/theme.css";
 import { MessageBubble } from "./MessageBubble";
 import OrderStep from "./OrderStep";
 import { TypingIndicator, SendIcon } from "./ChatUIElements";
@@ -432,6 +431,10 @@ export default function ChatScreen({ user, onLogout }) {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [voiceError, setVoiceError] = useState(null);
+  const [extrasPrompt, setExtrasPrompt] = useState(null);
+  const [extrasInput, setExtrasInput] = useState("");
+  const [inputHint, setInputHint] = useState("");
+  const [handledActionMessages, setHandledActionMessages] = useState([]);
   const lastReportedStatus = useRef(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -530,6 +533,31 @@ export default function ChatScreen({ user, onLogout }) {
     );
   };
 
+  const isLocationPrompt = (reply = "", data = {}) => {
+    if (
+      data.location_required === true ||
+      data.awaiting_location === true ||
+      data.requires_location === true
+    ) {
+      return true;
+    }
+
+    const normalized = String(reply || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return (
+      normalized.includes("necesito tu ubicacion exacta") ||
+      normalized.includes("comparte tu ubicacion exacta") ||
+      normalized.includes("compartir mi ubicacion") ||
+      (
+        normalized.includes("para completar tu pedido") &&
+        normalized.includes("ubicacion")
+      )
+    );
+  };
+
   const isOrderDraft = (reply = "") => {
     const normalized = reply
       .toLowerCase()
@@ -539,9 +567,94 @@ export default function ChatScreen({ user, onLogout }) {
     return normalized.includes("confirmas tu pedido");
   };
 
+  const isExtrasDecisionPrompt = (reply = "") => {
+    const normalized = String(reply || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return (
+      normalized.includes("deseas agregar extras a alguna de las pizzas") ||
+      (
+        normalized.includes("responde si") &&
+        normalized.includes("continuar sin extras")
+      )
+    );
+  };
+
+  const extractRegisteredProducts = (reply = "") => {
+    const products = [];
+    const regex = /[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n]+)/gi;
+    let match;
+
+    while ((match = regex.exec(reply)) !== null) {
+      products.push({
+        quantity: Number(match[1]),
+        name: match[2].trim(),
+      });
+    }
+
+    return products;
+  };
+
+  const markActionHandled = (messageId) => {
+    setHandledActionMessages((current) =>
+      current.includes(messageId)
+        ? current
+        : [...current, messageId]
+    );
+  };
+
+  const handleExtrasDecision = (decision, msg) => {
+    markActionHandled(msg.id);
+
+    if (decision === "no") {
+      setExtrasPrompt(null);
+      setExtrasInput("");
+      setInputHint("");
+      sendMessage("no");
+      return;
+    }
+
+    setExtrasPrompt({
+      messageId: msg.id,
+      products: msg.extrasProducts || [],
+    });
+    setExtrasInput("");
+  };
+
+  const submitExtrasDescription = () => {
+    const value = extrasInput.trim();
+    if (!value) return;
+
+    setExtrasPrompt(null);
+    setExtrasInput("");
+    setInputHint("");
+    sendMessage(value);
+  };
+
+  const handleOrderConfirmation = (decision, msg) => {
+    markActionHandled(msg.id);
+
+    if (decision === "si") {
+      setInputHint("");
+      sendMessage("confirmar");
+      return;
+    }
+
+    setInputHint(
+      "Escribe qué deseas agregar o cambiar. Ej. Agrega 2 refrescos o cambia una Pepperoni por Margarita."
+    );
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
+
   const sendMessage = async (text) => {
     if (!text.trim()) return;
 
+    setInputHint("");
     console.log("📤 [sendMessage] Iniciando envío de texto:", text);
 
     if (isListening) stopListening();
@@ -558,7 +671,20 @@ export default function ChatScreen({ user, onLogout }) {
       const data = await sendChat(text, user.id);
       console.log("📥 [API sendChat] Respuesta recibida:", data);
 
-      addMsg("bot", data.reply);
+      const locationPrompt = isLocationPrompt(data.reply, data);
+      const extrasDecisionPrompt = isExtrasDecisionPrompt(data.reply);
+      const extrasProducts = extrasDecisionPrompt
+        ? extractRegisteredProducts(data.reply)
+        : [];
+      const orderConfirmationPrompt =
+        data.is_order === true && isOrderDraft(data.reply);
+
+      // Agregamos metadatos de acciones para mostrar botones en el frontend.
+      addMsg("bot", data.reply, locationPrompt, {
+        requiresExtrasDecision: extrasDecisionPrompt,
+        extrasProducts,
+        requiresOrderConfirmation: orderConfirmationPrompt,
+      });
 
       const paymentPrompt =
         data.payment_required === true ||
@@ -583,6 +709,10 @@ export default function ChatScreen({ user, onLogout }) {
             gmail: user?.gmail || "",
             direccion: user?.direccion || "",
             total: orderTotal,
+            payment_method:
+              data.payment_method ||
+              pendingOrderData?.data?.payment_method ||
+              "",
           },
         };
 
@@ -594,13 +724,55 @@ export default function ChatScreen({ user, onLogout }) {
       }
 
       /*
-       * 2. El formulario se abre únicamente cuando el backend ya confirmó
+       * 2. Si el backend solicita ubicación, cerramos el selector de pago
+       *    y conservamos los datos del pedido para enviarlos cuando el
+       *    usuario confirme su ubicación.
+       */
+      if (locationPrompt) {
+        setOrderForm(null);
+
+        setPendingOrderData((current) => {
+          if (!current) {
+            console.error(
+              "❌ [sendMessage] Se solicitó ubicación sin pendingOrderData."
+            );
+            return current;
+          }
+
+          const paymentMethod =
+            data.payment_method ||
+            current.data?.payment_method ||
+            "efectivo";
+
+          const updated = {
+            ...current,
+            data: {
+              ...current.data,
+              payment_method: paymentMethod,
+            },
+          };
+
+          console.log(
+            "📍 [sendMessage] Pedido listo para ubicación:",
+            updated
+          );
+
+          return updated;
+        });
+
+        console.log(
+          "📍 [sendMessage] Solicitud de ubicación detectada. Botón habilitado."
+        );
+      }
+
+      /*
+       * 3. El formulario se abre únicamente cuando el backend ya confirmó
        *    el pedido y solicita el método de pago.
        *
        *    El mensaje del backend ya pregunta cómo pagar, por eso NO
        *    agregamos otro mensaje "¿Cómo vas a pagar?" desde el frontend.
        */
-      if (paymentPrompt) {
+      else if (paymentPrompt) {
         const storedOrder = pendingOrderData;
 
         const orderText =
@@ -672,11 +844,30 @@ export default function ChatScreen({ user, onLogout }) {
       setOrderForm(nextFormState);
       console.log("➡️ [submitOrderStep] Avanzando al siguiente paso del formulario:", nextFormState);
     } else {
-      const finalPendingData = { pedido: normalizeOrderText(orderForm.pedido), data: { ...newData } };
+      const finalPendingData = {
+        pedido: normalizeOrderText(orderForm.pedido),
+        data: {
+          ...newData,
+          payment_method:
+            newData.payment_method ||
+            orderForm.data?.payment_method ||
+            "efectivo",
+        },
+      };
+
       setPendingOrderData(finalPendingData);
       setOrderForm(null);
-      console.log("🏁 [submitOrderStep] Formulario finalizado. pendingOrderData listo:", finalPendingData);
-      addMsg("bot", "📍 Para completar tu pedido, necesito tu ubicación exacta.", true);
+
+      console.log(
+        "🏁 [submitOrderStep] Formulario finalizado. pendingOrderData listo:",
+        finalPendingData
+      );
+
+      addMsg(
+        "bot",
+        "📍 Para completar tu pedido, necesito tu ubicación exacta.",
+        true
+      );
     }
   };
 
@@ -820,100 +1011,71 @@ ${
     }
   };
 
-  // ── Estilo dinámico del textarea ────────────────────────────────────────────
-  const textareaStyle = {
-    ...s.textarea,
-    ...(isListening ? s.textareaListening : {}),
-  };
-
-  // ── Estilo dinámico del mic button ─────────────────────────────────────────
-  const micBtnStyle = {
-    ...s.micBtn,
-    ...(isListening ? s.micBtnActive : {}),
-  };
-
   return (
     <>
-      <div style={s.root}>
-        <div style={s.bgPattern} />
-        <div className={CLS.shell} style={s.shell}>
+      <div className="p220-shell-root">
+        <div className="p220-bg-pattern" />
+        <div className="p220-chat-shell">
 
           {/* ── Header ────────────────────────────────────────────────────────── */}
-          <header className={CLS.header} style={s.header}>
-            <div style={s.logoWrap}>
-              <span style={s.logoEmoji}>🍕</span>
+          <header className="p220-chat-header">
+            <div className="p220-logo-wrap">
+              <span className="p220-logo-emoji">🍕</span>
               <div>
-                <div style={s.logoName}>Pizzería 220</div>
-                <div style={s.logoSub}>
-                  <span style={s.logoSubDot} />
+                <div className="p220-logo-name">Pizzería 220</div>
+                <div className="p220-logo-sub-line">
+                  <span className="p220-logo-sub-dot" />
                   Asistente IA · Online
                 </div>
               </div>
             </div>
-            <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
-              <div style={s.userBadge}>
-                <span style={s.userInitial}>{(user?.nombre || "U")[0].toUpperCase()}</span>
-                <span className={CLS.userName} style={s.userName}>{user?.nombre}</span>
-                <span style={s.userRole}>{user?.role}</span>
+            <div className="p220-header-right">
+              <div className="p220-user-badge">
+                <span className="p220-user-initial">{(user?.nombre || "U")[0].toUpperCase()}</span>
+                <span className="p220-user-name">{user?.nombre}</span>
+                <span className="p220-user-role">{user?.role}</span>
               </div>
-              <button className={CLS.logoutBtn} onClick={handleLogout} style={s.logoutBtn} title="Cerrar sesión">⎋</button>
-              <div style={s.dot} />
+              <button className="p220-logout-btn" onClick={handleLogout} title="Cerrar sesión">⎋</button>
+              <div className="p220-status-dot" />
             </div>
           </header>
 
           {/* ── Feed ──────────────────────────────────────────────────────────── */}
-          <div className={CLS.feed} style={s.feed}>
+          <div className="p220-chat-messages">
             {messages.map((msg) => (
               <div key={msg.id}>
                 <MessageBubble msg={msg} />
-                
+
                 {/* QR Code */}
                 {msg.qrCodeBase64 && (
-                  <div style={{ marginTop: 8, marginLeft: 50, maxWidth: "calc(100% - 50px)" }}>
+                  <div className="p220-qr-wrap">
                     <img
                       src={`data:image/png;base64,${msg.qrCodeBase64}`}
                       alt="Código QR de Mercado Pago"
-                      style={{
-                        width: "min(220px, 55vw)",
-                        height: "min(220px, 55vw)",
-                        borderRadius: 12,
-                        border: "1px solid rgba(0,0,0,.08)",
-                        boxShadow: "0 2px 10px rgba(0,0,0,.08)",
-                        background: "#fff",
-                      }}
+                      className="p220-qr-img"
                     />
                   </div>
                 )}
 
                 {/* Botón de pago Mercado Pago */}
                 {msg.paymentUrl && (
-                  <div style={{ marginTop: 10, marginLeft: 50, maxWidth: "calc(100% - 50px)" }}>
+                  <div className="p220-pay-wrap">
                     <a
                       href={msg.paymentUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={CLS.link}
-                      style={s.payLink}
+                      className="p220-pay-link"
                     >
                       <span style={{ marginRight: 8 }}>💳</span>
                       Pagar con Mercado Pago
                     </a>
                     {msg.isSandbox && (
-                      <div style={{ 
-                        marginTop: 6, 
-                        fontSize: 12, 
-                        color: "#f59e0b",
-                        fontWeight: "500",
-                      }}>
+                      <div className="p220-pay-note p220-pay-note-warn">
                         🔬 Modo de prueba (sandbox)
                       </div>
                     )}
                     {msg.paymentStatus === "pending" && (
-                      <div style={{ 
-                        marginTop: 4, 
-                        fontSize: 12, 
-                        color: "#6b7280",
-                      }}>
+                      <div className="p220-pay-note p220-pay-note-muted">
                         ⏰ El enlace expira en 30 minutos
                       </div>
                     )}
@@ -921,26 +1083,125 @@ ${
                 )}
 
                 {msg.requiresLocation && !showLocationPicker && !loading && pendingOrderData && (
-                  <div style={{ marginTop:8, marginLeft:50, maxWidth: "calc(100% - 50px)" }}>
+                  <div className="p220-msg-action">
                     <button
-                      className={CLS.confirmBtn}
+                      className="p220-share-loc-btn"
                       onClick={() => {
                         console.log("🗺️ [UI] Botón compartir ubicación clickeado. Abriendo LocationPicker.");
                         setShowLocationPicker(true);
                       }}
                       disabled={isSubmittingOrder}
-                      style={{
-                        ...s.shareLocBtn,
-                        cursor: isSubmittingOrder ? "not-allowed" : "pointer",
-                        opacity: isSubmittingOrder ? 0.5 : 1,
-                      }}
                     >
                       📍 Compartir mi ubicación
                     </button>
                   </div>
                 )}
+
+                {msg.requiresExtrasDecision &&
+                  !loading &&
+                  !handledActionMessages.includes(msg.id) && (
+                    <div className="p220-msg-action p220-extras-decision-row">
+                      <button
+                        type="button"
+                        className="p220-opt-btn is-active"
+                        onClick={() => handleExtrasDecision("si", msg)}
+                      >
+                        Sí
+                      </button>
+
+                      <button
+                        type="button"
+                        className="p220-opt-btn"
+                        onClick={() => handleExtrasDecision("no", msg)}
+                      >
+                        No
+                      </button>
+                    </div>
+                  )}
+
+                {msg.requiresOrderConfirmation &&
+                  !loading &&
+                  !handledActionMessages.includes(msg.id) && (
+                    <div className="p220-msg-action p220-extras-decision-row">
+                      <button
+                        type="button"
+                        className="p220-opt-btn is-active"
+                        onClick={() => handleOrderConfirmation("si", msg)}
+                      >
+                        Sí, confirmar
+                      </button>
+
+                      <button
+                        type="button"
+                        className="p220-opt-btn"
+                        onClick={() => handleOrderConfirmation("no", msg)}
+                      >
+                        No, modificar
+                      </button>
+                    </div>
+                  )}
               </div>
             ))}
+
+            {extrasPrompt && (
+              <div className="p220-order-card">
+                <div className="p220-order-label">
+                  ¿A cuáles pizzas deseas agregar extras?
+                </div>
+
+                {extrasPrompt.products.length > 0 && (
+                  <div className="p220-extras-products-list">
+                    {extrasPrompt.products.map((product) => (
+                      <div key={product.name}>
+                        • {product.quantity} × Pizza {product.name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="p220-extras-hint">
+                  Escribe cuáles pizzas, cuántas unidades y qué extras deseas.
+                </div>
+
+                <div className="p220-order-input-row">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={extrasInput}
+                    onChange={(event) => setExtrasInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitExtrasDescription();
+                      }
+                    }}
+                    className="p220-order-input"
+                    placeholder="Ej. 2 Pepperoni con queso extra y 1 Pastorera con orilla"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={submitExtrasDescription}
+                    disabled={!extrasInput.trim()}
+                    className="p220-order-submit"
+                  >
+                    →
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  className="p220-opt-btn p220-extras-skip-btn"
+                  onClick={() =>
+                    handleExtrasDecision("no", {
+                      id: extrasPrompt.messageId,
+                    })
+                  }
+                >
+                  Continuar sin extras
+                </button>
+              </div>
+            )}
 
             {orderForm && ORDER_STEPS[orderForm.step] && (
               <OrderStep step={ORDER_STEPS[orderForm.step]} onSubmit={submitOrderStep} />
@@ -952,34 +1213,45 @@ ${
 
           {/* ── Input bar ─────────────────────────────────────────────────────── */}
           {!orderForm && (
-            <div className={CLS.inputBar} style={s.inputBar}>
+            <>
+              {inputHint && (
+                <div className="p220-order-card p220-input-hint-card">
+                  <div className="p220-order-label">
+                    Modifica tu pedido
+                  </div>
+                  <div className="p220-input-hint-text">
+                    {inputHint}
+                  </div>
+                </div>
+              )}
+
+              <div className="p220-chat-footer">
 
               {/* Botón de voz */}
               {isSupported && (
                 <button
-                  className={CLS.micBtn}
+                  className={`p220-mic-btn${isListening ? " is-listening" : ""}`}
                   onClick={handleVoiceClick}
                   disabled={loading || isSubmittingOrder}
-                  style={micBtnStyle}
                   title={isListening ? "Detener grabación" : "Activar voz"}
                 >
                   {/* Ripples — solo visibles mientras escucha */}
                   {isListening && (
                     <>
-                      <span style={s.micRipple} />
-                      <span style={s.micRipple2} />
+                      <span className="p220-mic-ripple" />
+                      <span className="p220-mic-ripple p220-mic-ripple-2" />
                     </>
                   )}
 
                   {/* Ícono o barras de onda */}
                   {isListening ? (
-                    <span style={s.micWave}>
-                      {[s.micWaveBar1, s.micWaveBar2, s.micWaveBar3, s.micWaveBar4, s.micWaveBar5].map((anim, i) => (
-                        <span key={i} style={{ ...s.micWaveBar, ...anim }} />
+                    <span className="p220-mic-wave">
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <span key={i} className={`p220-mic-wave-bar p220-mic-wave-bar-${i + 1}`} />
                       ))}
                     </span>
                   ) : (
-                    <span style={{ fontSize:17 }}>🎤</span>
+                    <span style={{ fontSize: 17 }}>🎤</span>
                   )}
                 </button>
               )}
@@ -996,33 +1268,33 @@ ${
                 }}
                 placeholder={isListening ? "🎤 Habla ahora..." : "Pregunta sobre el menú, promos o escribe tu pedido…"}
                 rows={1}
-                style={textareaStyle}
+                className={`p220-chat-textarea${isListening ? " is-listening" : ""}`}
                 disabled={loading || isSubmittingOrder || isListening}
               />
 
               <button
-                className={CLS.sendBtn}
+                className="p220-send-btn"
                 onClick={() => sendMessage(input)}
                 disabled={loading || isSubmittingOrder || !input.trim() || isListening}
-                style={{ ...s.sendBtn, opacity: (loading || isSubmittingOrder || !input.trim() || isListening) ? 0.35 : 1 }}
               >
                 <SendIcon />
               </button>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
 
       {/* ── Toast flotante de escucha ──────────────────────────────────────────── */}
       {isListening && (
-        <div style={s.listenToast}>
-          <span style={s.listenDot} />
+        <div className="p220-listen-toast">
+          <span className="p220-listen-dot" />
           <span>Escuchando...</span>
           {interimTranscript && (
-            <span style={s.listenInterim}>"{interimTranscript}"</span>
+            <span className="p220-listen-interim">"{interimTranscript}"</span>
           )}
           <button
-            style={s.cancelBtn}
+            className="p220-cancel-btn"
             onClick={() => {
               console.log("🎙️ [UI] Cancelando captura de voz.");
               stopListening();
@@ -1040,7 +1312,7 @@ ${
 
       {/* ── Voz no soportada ──────────────────────────────────────────────────── */}
       {!isSupported && (
-        <div style={s.voiceUnsupported}>
+        <div className="p220-voice-unsupported">
           ⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.
         </div>
       )}

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { register } from "../../api/auth";
 import { saveSession } from "../../utils/session";
-import { s, CLS } from "../../styles/theme";
 import { AuthShell, Field, Row, AuthBtn, AuthSwitch, ErrorMsg } from "./AuthCommon";
 
 /**
@@ -67,7 +66,7 @@ export default function RegisterScreen({ onLogin, onGo }) {
       <AuthBtn onClick={submit} loading={loading}>Crear cuenta</AuthBtn>
       <AuthSwitch>
         ¿Ya tienes cuenta?{" "}
-        <span className={CLS.link} onClick={onGo} style={s.authLink}>Inicia sesión</span>
+        <span className="p220-auth-link" onClick={onGo}>Inicia sesión</span>
       </AuthSwitch>
     </AuthShell>
   );

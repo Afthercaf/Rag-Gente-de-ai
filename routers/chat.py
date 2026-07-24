@@ -10,7 +10,11 @@ from core.decorators import measure_time
 from core.state import state
 from schemas.chat import ChatRequest, QuickReplyRequest
 from services import llm_service, rag_service
-from services.intent_detector import has_pizza_name, is_order_flow_active
+from services.intent_detector import (
+    has_order_intent,
+    has_pizza_name,
+    is_order_flow_active,
+)
 from services.session_service import (
     append_to_history,
     build_enriched_query,
@@ -140,6 +144,7 @@ async def chat(req: ChatRequest):
     is_greeting = (
         bool(_SALUDO_RE.search(query))
         and not is_new_order_query(query, pizza_names)
+        and not has_order_intent(query)
         and not has_pizza_name(query, pizza_names)
     )
 

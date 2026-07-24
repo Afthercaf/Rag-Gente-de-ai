@@ -1,5 +1,3 @@
-import { s, CLS } from "../../styles/theme";
-
 /** Renderiza negrita (**texto**) y saltos de línea. */
 function MarkdownText({ text }) {
   return (
@@ -22,9 +20,9 @@ function MarkdownText({ text }) {
 export function MessageBubble({ msg }) {
   const isBot = msg.role === "bot";
   return (
-    <div style={{ ...s.msgRow, justifyContent: isBot ? "flex-start" : "flex-end" }}>
-      {isBot && <span style={s.avatar}>🍕</span>}
-      <div className={CLS.bubble} style={isBot ? s.bubbleBot : s.bubbleUser}>
+    <div className={`p220-msg-row${isBot ? "" : " is-user"}`}>
+      {isBot && <span className="p220-avatar">🍕</span>}
+      <div className={`p220-bubble ${isBot ? "p220-bubble-bot" : "p220-bubble-user"}`}>
         <MarkdownText text={msg.text} />
       </div>
     </div>

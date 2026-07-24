@@ -123,6 +123,25 @@ def is_only_greeting(text: str) -> bool:
     words = set(n.split())
     return bool(words & _SALUDO_NORM) and not bool(words & _ORDER_NORM)
 
+def _non_menu_food_warning(text: str) -> str | None:
+    """Describe alimentos externos que se ignorarán en un pedido mixto."""
+    n = _normalize(text)
+    found: list[str] = []
+
+    if re.search(r"\b(?:hamburguesa(?:s)?|burger(?:s)?)\b", n):
+        found.append("hamburguesa")
+    if re.search(r"\bpapas?(?:\s+fritas)?\b", n):
+        found.append("papas")
+
+    if not found:
+        return None
+
+    return (
+        f"No agregaré {' y '.join(found)} porque no pertenece al menú. "
+        "Solo registraré las pizzas válidas que mencionaste."
+    )
+
+
 def has_order_intent(text: str) -> bool:
     n = _normalize(text)
     if any(re.search(r'\b' + re.escape(kw) + r'\b', n) for kw in _QUESTION_NORM):
@@ -1203,36 +1222,54 @@ def _extras_menu_text(extras_context: str) -> str:
 
 
 def _quantity_before_name(text: str, name: str) -> int:
-    """Obtiene la cantidad escrita antes de una pizza válida.
+    """Suma todas las cantidades asociadas a una pizza válida.
 
-    Acepta el nombre singular del catálogo y su forma plural natural:
-    Margarita/Margaritas, Mexicana/Mexicanas, Pastorera/Pastoreras,
-    Campirana/Campiranas y Pepperoni/Pepperonis.
+    Acepta variantes como:
+    - ``2 pizzas de pepperoni``
+    - ``2 de campirana``
+    - ``una mexicana y una pizza mexicana``
+    - ``mil pizzas de pepperoni``
     """
     n = _normalize(text)
     target = re.escape(_normalize(name))
+
     number_words = {
-        "un": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4,
-        "cinco": 5, "seis": 6, "siete": 7, "ocho": 8,
-        "nueve": 9, "diez": 10, "once": 11, "doce": 12,
-        "trece": 13, "catorce": 14, "quince": 15, "dieciseis": 16,
+        "un": 1, "una": 1, "uno": 1,
+        "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+        "seis": 6, "siete": 7, "ocho": 8, "nueve": 9,
+        "diez": 10, "once": 11, "doce": 12, "trece": 13,
+        "catorce": 14, "quince": 15, "dieciseis": 16,
         "diecisiete": 17, "dieciocho": 18, "diecinueve": 19,
-        "veinte": 20,
+        "veinte": 20, "mil": 1000,
     }
+
     words = "|".join(sorted(number_words, key=len, reverse=True))
     plural = rf"{target}(?:s|es)?"
-    m = re.search(
-        rf"(?:(\d+)|\b({words})\b)?\s*"
-        rf"(?:pizzas?\s+)?(?:pizza\s+)?{plural}\b",
-        n,
+
+    pattern = re.compile(
+        rf"(?<!\w)"
+        rf"(?:(\d[\d,\.]*)|\b({words})\b)?\s*"
+        rf"(?:pizzas?\s+)?(?:de\s+)?(?:pizza\s+)?{plural}\b",
+        re.IGNORECASE,
     )
-    if not m:
-        return 0
-    if m.group(1):
-        return int(m.group(1))
-    if m.group(2):
-        return number_words[m.group(2)]
-    return 1
+
+    total = 0
+    found = False
+
+    for match in pattern.finditer(n):
+        found = True
+
+        if match.group(1):
+            raw = re.sub(r"[,.]", "", match.group(1))
+            quantity = int(raw)
+        elif match.group(2):
+            quantity = number_words[match.group(2)]
+        else:
+            quantity = 1
+
+        total += quantity
+
+    return total if found else 0
 
 
 def _formatted_menu_catalog() -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
@@ -1300,7 +1337,11 @@ def _beverage_catalog_item(context: str = "") -> dict | None:
 def _requested_beverage_quantity(text: str) -> int:
     n = _normalize(text)
     words = {"un":1,"una":1,"dos":2,"tres":3,"cuatro":4,"cinco":5,"seis":6,"siete":7,"ocho":8,"nueve":9,"diez":10}
-    m = re.search(r"(?:(\d+)|\b(" + "|".join(words) + r")\b)?\s*(?:cocas?|coca-colas?|refrescos?|bebidas?)\b", n)
+    m = re.search(
+        r"(?:(\d+)|\b(" + "|".join(words) + r")\b)?\s*"
+        r"(?:cocas?|coca-colas?|refrescos?|refrecos?|refres?cos?|bebidas?)\b",
+        n,
+    )
     if not m:
         return 0
     if m.group(1): return int(m.group(1))
@@ -1378,19 +1419,50 @@ def _find_requested_extras(text: str, extras_context: str) -> list[dict]:
     if marker:
         scope = n[marker.start():]
     else:
-        # Caso normal: elimina nombres de pizza antes de buscar extras homónimos.
-        scope = re.sub(r"\bpizzas?\s+pepperoni\b", " ", scope)
+        # Caso normal: elimina menciones de Pizza Pepperoni antes de
+        # buscar el extra homónimo. Soporta:
+        # "2 pizzas de pepperoni", "2 de pepperoni" y "Pizza Pepperoni".
+        # No elimina "con pepperoni", que sí puede ser un extra real.
+        scope = re.sub(
+            r"\b(?:"
+            r"(?:\d[\d,.]*|un|una|uno|dos|tres|cuatro|cinco|seis|"
+            r"siete|ocho|nueve|diez|once|doce|trece|catorce|quince|"
+            r"dieciseis|diecisiete|dieciocho|diecinueve|veinte|mil)"
+            r"\s+(?:pizzas?\s+)?(?:de\s+)?pepperonis?"
+            r"|pizzas?\s+(?:de\s+)?pepperonis?"
+            r"|pizza\s+pepperoni"
+            r")\b",
+            " ",
+            scope,
+        )
 
     if re.search(r"\b(?:con todo|todos los extras|todo)\b", scope):
         return [{"name": name, "price": price} for name, price in catalog]
 
     found: list[dict] = []
     seen: set[str] = set()
+
     for name, price in catalog:
         key = _normalize(name)
-        if re.search(r"\b" + re.escape(key) + r"\b", scope) and key not in seen:
-            seen.add(key)
-            found.append({"name": name, "price": price})
+
+        if not re.search(r"\b" + re.escape(key) + r"\b", scope):
+            continue
+
+        # Una negación posterior anula el extra mencionado:
+        # "queso extra pero quítale el queso".
+        short_key = key.replace(" extra", "").strip()
+        negated = bool(re.search(
+            rf"\b(?:sin|quita(?:le)?|quitale|no\s+quiero|elimina)\b"
+            rf"[^.;,]{{0,30}}\b{re.escape(short_key)}\b",
+            scope,
+        ))
+
+        if negated or key in seen:
+            continue
+
+        seen.add(key)
+        found.append({"name": name, "price": price})
+
     return found
 
 
@@ -1442,8 +1514,33 @@ def _apply_inline_selections_to_cart(
     beverages = _find_requested_beverages(question, context)
     n = _normalize(question)
 
+    explicit_no_extras = bool(
+        re.search(
+            r"\b(?:sin\s+(?:ningun(?:o|a)\s+)?extras?|"
+            r"sin\s+nada(?:\s+extra)?|"
+            r"no\s+quiero\s+extras?|"
+            r"ningun(?:o|a)\s+de\s+extras?)\b",
+            n,
+        )
+    )
+
+    # También cuenta como "sin extras" cuando todos los extras mencionados
+    # fueron anulados después: "queso extra pero quítale el queso".
+    mentioned_extra_name = any(
+        re.search(r"\b" + re.escape(_normalize(name)) + r"\b", n)
+        for name, _ in _catalog_extras(extras_context)
+    )
+    all_mentioned_extras_negated = mentioned_extra_name and not extras and bool(
+        re.search(
+            r"\b(?:sin|quita(?:le)?|quitale|elimina|no\s+quiero)\b",
+            n,
+        )
+    )
+
     mentions_extra = bool(
         extras
+        or explicit_no_extras
+        or all_mentioned_extras_negated
         or re.search(
             r"\b(?:extra|extras|agregales|agrégales|ponles|a todas|a las \d+)\b",
             n,
@@ -1458,6 +1555,17 @@ def _apply_inline_selections_to_cart(
         return False, None
 
     if mentions_extra and not extras:
+        if explicit_no_extras or all_mentioned_extras_negated:
+            # Continuar deliberadamente sin extras.
+            for item in items:
+                item["extras"] = []
+                item["beverages"] = []
+
+            cart["beverages"] = [dict(beverage) for beverage in beverages]
+            cart["cursor"] = len(items)
+            cart["status"] = "awaiting_confirmation"
+            return True, None
+
         return True, (
             "No encontré ese ingrediente en la lista de extras disponibles. "
             "No lo agregaré ni inventaré un precio.\n\n"
@@ -1614,17 +1722,129 @@ def _cart_summary(cart: dict) -> str:
     return "\n".join(lines)
 
 
-def _first_item_extras_prompt(cart: dict, extras_context: str) -> str:
-    """Inicia la selección individual después de que el cliente aceptó extras."""
+def _targeted_extras_prompt(cart: dict, extras_context: str) -> str:
+    """Solicita los extras de varias pizzas en una sola instrucción."""
     items = cart.get("items", [])
     if not items:
         return LITERAL_RESPONSE_PREFIX + "No hay pizzas activas en el carrito."
-    first = items[0]
+
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item["pizza"]] = counts.get(item["pizza"], 0) + 1
+
+    products = "\n".join(
+        f"• {quantity} × Pizza {pizza}"
+        for pizza, quantity in counts.items()
+    )
+
     return LITERAL_RESPONSE_PREFIX + (
-        f"Perfecto. Revisaremos cada pizza por separado.\n\n"
-        f"Pizza {first['pizza']} (1 de {len(items)}):\n\n"
-        f"{_extras_menu_text(extras_context)}\n\n"
-        "¿Qué extra deseas para esta pizza? Puedes responder ninguno. ➕"
+        "Perfecto. Indica a cuáles pizzas deseas agregar extras, "
+        "cuántas unidades y cuáles extras.\n\n"
+        f"{products}\n\n"
+        f"Extras disponibles:\n{_extras_menu_text(extras_context)}\n\n"
+        "Ejemplo: 2 Pepperoni con queso extra y 1 Pastorera "
+        "con orilla de queso."
+    )
+
+
+def _quantity_near_pizza_reference(prefix: str) -> int:
+    """Obtiene la cantidad inmediatamente anterior a una referencia."""
+    n = _normalize(prefix)[-45:]
+    words = {
+        "un": 1, "una": 1, "uno": 1, "dos": 2, "tres": 3,
+        "cuatro": 4, "cinco": 5, "seis": 6, "siete": 7,
+        "ocho": 8, "nueve": 9, "diez": 10, "once": 11,
+        "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
+        "dieciseis": 16, "diecisiete": 17, "dieciocho": 18,
+        "diecinueve": 19, "veinte": 20,
+    }
+    names = "|".join(sorted(words, key=len, reverse=True))
+    match = re.search(
+        rf"(?:(\d+)|\b({names})\b)\s*(?:pizzas?\s*)?(?:de\s*)?$",
+        n,
+    )
+    if not match:
+        return 1
+    if match.group(1):
+        return int(match.group(1))
+    return words[match.group(2)]
+
+
+def _apply_targeted_extras(
+    question: str,
+    cart: dict,
+    extras_context: str,
+) -> tuple[bool, str]:
+    """Aplica extras a cantidades concretas de cada tipo de pizza."""
+    normalized = _normalize(question)
+    items = cart.get("items", [])
+    pizza_names = sorted(
+        {str(item.get("pizza", "")).strip() for item in items if item.get("pizza")},
+        key=len,
+        reverse=True,
+    )
+
+    references: list[tuple[int, int, str]] = []
+    for pizza in pizza_names:
+        key = re.escape(_normalize(pizza))
+        for match in re.finditer(rf"\b(?:pizza\s+)?{key}s?\b", normalized):
+            references.append((match.start(), match.end(), pizza))
+
+    references.sort(key=lambda value: value[0])
+    if not references:
+        return False, (
+            "No pude identificar a qué pizzas deseas agregar extras. "
+            "Escribe, por ejemplo: 2 Pepperoni con queso extra y "
+            "1 Pastorera con orilla de queso."
+        )
+
+    applied = 0
+    details: list[str] = []
+
+    for index, (start, end, pizza) in enumerate(references):
+        segment_end = references[index + 1][0] if index + 1 < len(references) else len(normalized)
+        prefix_start = references[index - 1][1] if index > 0 else 0
+        prefix = normalized[prefix_start:start]
+        # Analizar únicamente el texto posterior al nombre de la pizza.
+        # Así, en "2 Pepperoni con queso extra", Pepperoni se conserva como
+        # producto y no se interpreta también como el extra "pepperoni".
+        segment = normalized[end:segment_end]
+        quantity = _quantity_near_pizza_reference(prefix)
+        extras = _find_requested_extras(segment, extras_context)
+
+        if not extras:
+            continue
+
+        matching = [item for item in items if _normalize(item.get("pizza", "")) == _normalize(pizza)]
+        available = [item for item in matching if not item.get("extras")]
+        selected = available[:quantity]
+
+        if not selected:
+            continue
+
+        for item in selected:
+            item["extras"] = [dict(extra) for extra in extras]
+
+        applied += len(selected)
+        details.append(
+            f"• {len(selected)} × Pizza {pizza}: "
+            + ", ".join(extra["name"] for extra in extras)
+        )
+
+    if applied == 0:
+        return False, (
+            "No encontré una combinación válida de pizzas y extras. "
+            "Indica cantidad, pizza y extra; por ejemplo: "
+            "2 Pepperoni con queso extra."
+        )
+
+    cart["cursor"] = len(items)
+    cart["status"] = "awaiting_confirmation"
+    return True, (
+        "Extras aplicados correctamente:\n"
+        + "\n".join(details)
+        + "\n\n"
+        + _cart_summary(cart)
     )
 
 
@@ -1645,7 +1865,7 @@ def _start_cart_response(cart: dict, extras_context: str) -> str:
         base.extend([
             "",
             "¿Deseas agregar extras a alguna de las pizzas?",
-            "Responde sí para configurarlas una por una, o no para continuar sin extras. ➕",
+            "Selecciona Sí para indicar cuáles pizzas, cuántas y qué extras; o No para continuar sin extras. ➕",
         ])
         return LITERAL_RESPONSE_PREFIX + "\n".join(base)
 
@@ -1872,11 +2092,27 @@ def _modify_awaiting_cart(question: str, cart: dict, context: str) -> str | None
     if n in {"modificar", "modifica", "cambiar pedido", "quiero modificar"}:
         return "Indícame qué deseas modificar. Puedes agregar bebidas, cambiar la pizza o cancelar el pedido."
     qty = _requested_beverage_quantity(question)
-    if qty and re.search(r"\b(?:agrega|agregar|añade|anade|pon|dame|quiero)\b", n):
+    if qty and re.search(
+        r"\b(?:agrega|agregar|añade|anade|pon|dame|quiero)\b",
+        n,
+    ):
         bev = _beverage_catalog_item(context)
         if not bev:
             return "No pude consultar la bebida disponible en este momento."
-        cart["beverages"] = [{**bev, "quantity": qty}]
+
+        existing = sum(
+            int(item.get("quantity", 1))
+            for item in cart.get("beverages", [])
+            if _normalize(item.get("name", "")) == _normalize(bev["name"])
+        )
+
+        is_additive = bool(re.search(
+            r"\b(?:mas|más|adicional(?:es)?|extra(?:s)?)\b",
+            n,
+        ))
+
+        final_qty = existing + qty if is_additive else qty
+        cart["beverages"] = [{**bev, "quantity": final_qty}]
         return _cart_summary(cart)
     return None
 
@@ -1989,9 +2225,29 @@ def build_directive(
             cart.update({"status": "cancelled", "items": [], "cursor": 0, "user_id": cart.get("user_id", 0)})
         return LITERAL_RESPONSE_PREFIX + "✅ Pedido cancelado. ¿Quieres ver el menú? 🍕"
 
-    # 3. Cambio de opinión tiene prioridad absoluta.
-    if cart and cart.get("items") and _CHANGE_RE.search(question):
-        response, cart = _reset_cart_for_change(question, pizza_names, context, cart)
+    # 3. Cambio de opinión. "Mejor agrega 2 refrescos más" no es un
+    # cambio de pizza: es una modificación acumulativa del carrito.
+    is_beverage_adjustment = bool(
+        _requested_beverage_quantity(question)
+        and re.search(
+            r"\b(?:coca(?:-cola)?|cocas?|refrescos?|refrecos?|refres?cos?|bebidas?)\b",
+            n,
+        )
+        and re.search(r"\b(?:agrega|agregar|añade|anade|pon|dame|quiero)\b", n)
+    )
+
+    if (
+        cart
+        and cart.get("items")
+        and _CHANGE_RE.search(question)
+        and not is_beverage_adjustment
+    ):
+        response, cart = _reset_cart_for_change(
+            question,
+            pizza_names,
+            context,
+            cart,
+        )
         if response:
             return response
         return _start_cart_response(cart, extras_context)
@@ -2010,12 +2266,30 @@ def build_directive(
                 "✅ Pedido confirmado.\n\n💳 ¿Cómo deseas pagar?\n"
                 "• Efectivo\n• Mercado Pago"
             )
+        if re.search(
+            r"\b(?:no quiero|ya no quiero|no deseo)\b",
+            n,
+        ):
+            cart.clear()
+            cart.update({
+                "status": "cancelled",
+                "items": [],
+                "cursor": 0,
+                "user_id": user_id or cart.get("user_id", 0),
+            })
+            return LITERAL_RESPONSE_PREFIX + (
+                "✅ Pedido cancelado. ¿Quieres ver el menú? 🍕"
+            )
+
         if has_order_intent(question) and not has_pizza_name(question, pizza_names):
             return LITERAL_RESPONSE_PREFIX + (
                 "Ese producto no pertenece al menú y no modificaré tu pedido actual. "
                 "Puedes confirmar, agregar Coca-Cola, cambiar la pizza o cancelar."
             )
-        return LITERAL_RESPONSE_PREFIX + "Puedes confirmar el pedido, agregar bebidas, cambiar la pizza o cancelar."
+
+        return LITERAL_RESPONSE_PREFIX + (
+            "Puedes confirmar el pedido, agregar bebidas, cambiar la pizza o cancelar."
+        )
 
     # 5. Pregunta previa para pedidos de varias pizzas.
     if cart and cart.get("status") == "asking_any_extras" and cart.get("items"):
@@ -2033,14 +2307,31 @@ def build_directive(
             return LITERAL_RESPONSE_PREFIX + _cart_summary(cart)
 
         if is_pure_affirmation(question) or re.search(r"\b(?:si|sí|alguna|algunas)\b", n):
-            cart["status"] = "collecting_extras"
+            cart["status"] = "collecting_targeted_extras"
             cart["cursor"] = 0
-            return _first_item_extras_prompt(cart, extras_context)
+            return _targeted_extras_prompt(cart, extras_context)
 
         return LITERAL_RESPONSE_PREFIX + (
             "¿Deseas agregar extras a alguna de las pizzas? "
-            "Responde sí para elegirlos o no para continuar sin extras."
+            "Selecciona Sí para indicar pizzas, cantidades y extras; o No para continuar sin extras."
         )
+
+    # 5.1 Extras agrupados: el cliente indica pizza, cantidad y extras.
+    if cart and cart.get("status") == "collecting_targeted_extras" and cart.get("items"):
+        if is_no_in_order_flow(question) or _is_skip_extras_answer(question):
+            for item in cart["items"]:
+                item["extras"] = []
+                item["beverages"] = []
+            cart["cursor"] = len(cart["items"])
+            cart["status"] = "awaiting_confirmation"
+            return LITERAL_RESPONSE_PREFIX + _cart_summary(cart)
+
+        success, response = _apply_targeted_extras(
+            question,
+            cart,
+            extras_context,
+        )
+        return LITERAL_RESPONSE_PREFIX + response
 
     # 5. Extras por unidad, usando el carrito aislado.
     if cart and cart.get("status") == "collecting_extras" and cart.get("items"):
@@ -2181,9 +2472,31 @@ def build_directive(
         if handled_inline:
             if inline_error:
                 return LITERAL_RESPONSE_PREFIX + inline_error
-            return LITERAL_RESPONSE_PREFIX + _cart_summary(cart)
 
-        return _start_cart_response(cart, extras_context)
+            summary = _cart_summary(cart)
+            warning = _non_menu_food_warning(question)
+
+            if warning:
+                return LITERAL_RESPONSE_PREFIX + warning + "\n\n" + summary
+
+            return LITERAL_RESPONSE_PREFIX + summary
+
+        warning = _non_menu_food_warning(question)
+        response = _start_cart_response(cart, extras_context)
+
+        if warning:
+            clean_response = response
+            if clean_response.startswith(LITERAL_RESPONSE_PREFIX):
+                clean_response = clean_response[len(LITERAL_RESPONSE_PREFIX):]
+
+            return (
+                LITERAL_RESPONSE_PREFIX
+                + warning
+                + "\n\n"
+                + clean_response
+            )
+
+        return response
 
     # 10. Pedido sin pizza: nunca dejar que el LLM invente una.
     if has_order_intent(question):
