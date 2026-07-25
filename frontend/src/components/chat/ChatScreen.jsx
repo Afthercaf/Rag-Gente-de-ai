@@ -401,6 +401,8 @@
 
 
 
+
+
 import { useState, useRef, useEffect } from "react";
 import { sendChat, placeOrder } from "../../api/chat";
 import { logout } from "../../api/auth";
@@ -498,6 +500,23 @@ export default function ChatScreen({ user, onLogout }) {
       if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
     };
   }, []);
+
+  // El cliente API emite este evento cuando el servidor responde 401.
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearSession();
+      onLogout();
+    };
+
+    window.addEventListener("p220:unauthorized", handleUnauthorized);
+
+    return () => {
+      window.removeEventListener(
+        "p220:unauthorized",
+        handleUnauthorized
+      );
+    };
+  }, [onLogout]);
 
   const addMsg = (role, text, requiresAction = false, extra = {}) => {
     console.log(`💬 [addMsg] Agregando mensaje - Rol: ${role} | Texto:`, text);
@@ -740,10 +759,10 @@ export default function ChatScreen({ user, onLogout }) {
 
     try {
       console.log(
-        `🌐 [API sendChat] Solicitando con - text: "${text}", userId: ${user?.id}`
+        `🌐 [API sendChat] Solicitando mensaje autenticado: "${text}"`
       );
 
-      const data = await sendChat(text, user.id);
+      const data = await sendChat(text);
       console.log("📥 [API sendChat] Respuesta recibida:", data);
 
       const locationPrompt = isLocationPrompt(data.reply, data);
@@ -973,13 +992,12 @@ export default function ChatScreen({ user, onLogout }) {
       const pedidoText = normalizeOrderText(orderData.pedido);
       
       console.log("🌐 [API placeOrder] Enviando payload final:", {
-        userId: user.id,
         pedidoText,
         userData: orderData.data,
         location
       });
 
-      const result = await placeOrder(user.id, pedidoText, orderData.data, location);
+      const result = await placeOrder(pedidoText, orderData.data, location);
       console.log("📥 [API placeOrder] Respuesta del servidor:", result);
 
       if (result.success) {

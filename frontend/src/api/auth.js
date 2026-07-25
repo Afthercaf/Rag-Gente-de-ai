@@ -1,86 +1,52 @@
-import client from "./axiosClient";
-import { sha256 } from "../utils/crypto";
+import { apiRequest } from "./client";
+import {
+  clearSession,
+  saveSession,
+} from "../utils/session";
 
-/**
- * Iniciar sesión
- * @param {string} gmail
- * @param {string} password
- * @returns {Promise<{success:boolean,user?:object,message?:string}>}
- */
 export async function login(gmail, password) {
-  try {
-    const email = gmail.trim().toLowerCase();
-    const hash = await sha256(password);
+  const data = await apiRequest("/auth/login", {
+    method: "POST",
+    authenticated: false,
+    body: {
+      gmail: gmail.trim(),
+      password,
+    },
+  });
 
-    console.log("Login email:", email);
-    console.log("Login hash:", hash);
+  saveSession({
+    accessToken: data.access_token,
+    user: data.user,
+  });
 
-    const { data } = await client.post("/auth/login", {
-      gmail: email,
-      password: hash,
-    });
-
-    return data;
-  } catch (error) {
-    console.error(
-      "Error login:",
-      error?.response?.data || error?.message || error
-    );
-
-    // Mantiene la causa original para ESLint
-    throw new Error(
-      error?.response?.data?.message || "Error al iniciar sesión",
-      { cause: error }
-    );
-  }
+  return data.user;
 }
 
-/**
- * Registrar usuario
- * @param {Object} fields
- * @returns {Promise<{success:boolean,user?:object,message?:string}>}
- */
-export async function register(fields) {
-  try {
-    const hash = await sha256(fields.password);
-
-    const payload = {
-      ...fields,
-      gmail: fields.gmail.trim().toLowerCase(),
-      password: hash,
-    };
-
-    const { data } = await client.post("/auth/register", payload);
-
-    return data;
-  } catch (error) {
-    console.error(
-      "Error registro:",
-      error?.response?.data || error?.message || error
-    );
-
-    throw new Error(
-      error?.response?.data?.message || "Error al registrar usuario",
-      { cause: error }
-    );
-  }
+export async function register(form) {
+  return apiRequest("/auth/register", {
+    method: "POST",
+    authenticated: false,
+    body: {
+      nombre: form.nombre.trim(),
+      telefono: form.telefono.trim(),
+      gmail: form.gmail.trim(),
+      direccion: form.direccion.trim(),
+      password: form.password,
+    },
+  });
 }
 
-/**
- * Cerrar sesión
- */
+export async function getCurrentUser() {
+  return apiRequest("/auth/me");
+}
+
 export async function logout() {
   try {
-    await client.post("/auth/logout");
-  } catch (error) {
-    console.error(
-      "Error logout:",
-      error?.response?.data || error?.message || error
-    );
-
-    throw new Error(
-      error?.response?.data?.message || "Error al cerrar sesión",
-      { cause: error }
-    );
+    await apiRequest("/auth/logout", {
+      method: "POST",
+      body: {},
+    });
+  } finally {
+    clearSession();
   }
 }

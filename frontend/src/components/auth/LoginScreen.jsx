@@ -1,24 +1,30 @@
 import { useState } from "react";
+
 import { login } from "../../api/auth";
 import {
-  AuthShell,
-  Field,
   AuthBtn,
+  AuthShell,
   AuthSwitch,
   ErrorMsg,
+  Field,
 } from "./AuthCommon";
 
 /**
- * @param {{ onLogin: (user) => void, onGo: () => void }} props
+ * @param {{ onLogin: (user: object) => void, onGo: () => void }} props
  */
-export default function LoginScreen({ onLogin, onGo }) {
+export default function LoginScreen({
+  onLogin,
+  onGo,
+}) {
   const [gmail, setGmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!gmail.trim() || !password.trim()) {
+    if (loading) return;
+
+    if (!gmail.trim() || !password) {
       setError("Completa todos los campos.");
       return;
     }
@@ -27,16 +33,20 @@ export default function LoginScreen({ onLogin, onGo }) {
     setError("");
 
     try {
-      const data = await login(gmail, password);
+      /*
+       * api/auth.js guarda access_token + user y devuelve
+       * directamente el usuario autenticado.
+       */
+      const user = await login(
+        gmail.trim(),
+        password
+      );
 
-      if (data.success) {
-        // La cookie ya la guarda el backend
-        onLogin(data.user);
-      } else {
-        setError(data.message || "Credenciales incorrectas.");
-      }
+      onLogin(user);
     } catch (err) {
-      setError(err?.message || "Error al iniciar sesión");
+      setError(
+        err?.message || "No se pudo iniciar sesión."
+      );
     } finally {
       setLoading(false);
     }
@@ -48,33 +58,49 @@ export default function LoginScreen({ onLogin, onGo }) {
       subtitle="Inicia sesión para continuar"
     >
       <Field
-        label="Correo Gmail"
+        label="Correo electrónico"
+        name="gmail"
         type="email"
         value={gmail}
         onChange={setGmail}
         placeholder="usuario@gmail.com"
+        autoComplete="email"
+        disabled={loading}
+        required
       />
 
       <Field
         label="Contraseña"
+        name="password"
         type="password"
         value={password}
         onChange={setPassword}
-        placeholder="••••••••"
+        placeholder="••••••••••"
+        autoComplete="current-password"
         onEnter={submit}
+        disabled={loading}
+        required
       />
 
       {error && <ErrorMsg>{error}</ErrorMsg>}
 
-      <AuthBtn onClick={submit} loading={loading}>
+      <AuthBtn
+        onClick={submit}
+        loading={loading}
+      >
         Entrar
       </AuthBtn>
 
       <AuthSwitch>
         ¿No tienes cuenta?{" "}
-        <span className="p220-auth-link" onClick={onGo}>
+        <button
+          type="button"
+          className="p220-auth-link"
+          onClick={onGo}
+          disabled={loading}
+        >
           Regístrate
-        </span>
+        </button>
       </AuthSwitch>
     </AuthShell>
   );

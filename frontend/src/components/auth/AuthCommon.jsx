@@ -1,18 +1,46 @@
-import '../../styles/theme.css';
+import "../../styles/theme.css";
 
-/** Contenedor centrado con logo para las pantallas de auth */
-export function AuthShell({ title, subtitle, children }) {
+/**
+ * Contenedor centrado con logo para las pantallas de autenticación.
+ */
+export function AuthShell({
+  title,
+  subtitle,
+  children,
+}) {
   return (
     <div className="p220-auth-shell">
-      <div className="p220-bg-pattern" />
+      <div
+        className="p220-bg-pattern"
+        aria-hidden="true"
+      />
+
       <div className="p220-auth-wrap">
         <div className="p220-auth-logo">
-          <span style={{ fontSize: 48 }}>🍕</span>
-          <div className="p220-logo-name">Pizzería 220</div>
-          <div className="p220-logo-sub" style={{ textAlign: "center" }}>{subtitle}</div>
+          <span
+            style={{ fontSize: 48 }}
+            aria-hidden="true"
+          >
+            🍕
+          </span>
+
+          <div className="p220-logo-name">
+            Pizzería 220
+          </div>
+
+          <div
+            className="p220-logo-sub"
+            style={{ textAlign: "center" }}
+          >
+            {subtitle}
+          </div>
         </div>
+
         <div className="p220-auth-card">
-          <div className="p220-auth-title">{title}</div>
+          <h1 className="p220-auth-title">
+            {title}
+          </h1>
+
           {children}
         </div>
       </div>
@@ -20,24 +48,71 @@ export function AuthShell({ title, subtitle, children }) {
   );
 }
 
-/** Input con etiqueta */
-export function Field({ label, type = "text", value, onChange, placeholder, onEnter }) {
+/**
+ * Input con etiqueta y atributos accesibles.
+ */
+export function Field({
+  label,
+  name,
+  type = "text",
+  value,
+  onChange,
+  placeholder,
+  onEnter,
+  autoComplete,
+  inputMode,
+  disabled = false,
+  required = false,
+  minLength,
+  maxLength,
+}) {
+  const inputId = `p220-${name || label
+    .toLowerCase()
+    .replace(/\s+/g, "-")}`;
+
   return (
     <div className="p220-field-wrap">
-      <label className="p220-field-label">{label}</label>
+      <label
+        className="p220-field-label"
+        htmlFor={inputId}
+      >
+        {label}
+      </label>
+
       <input
+        id={inputId}
+        name={name}
         className="p220-auth-input"
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && onEnter) onEnter(); }}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            onEnter &&
+            !disabled
+          ) {
+            event.preventDefault();
+            onEnter();
+          }
+        }}
         placeholder={placeholder}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        disabled={disabled}
+        required={required}
+        minLength={minLength}
+        maxLength={maxLength}
       />
     </div>
   );
 }
 
-/** Fila de dos columnas */
+/**
+ * Fila responsive de dos columnas.
+ */
 export function Row({ children }) {
   return (
     <div className="p220-row-2col">
@@ -46,20 +121,30 @@ export function Row({ children }) {
   );
 }
 
-/** Botón de submit con estado de carga */
-export function AuthBtn({ onClick, loading, children }) {
+/**
+ * Botón principal con estado de carga.
+ */
+export function AuthBtn({
+  onClick,
+  loading,
+  children,
+}) {
   return (
     <button
+      type="button"
       className="p220-auth-submit"
       onClick={onClick}
       disabled={loading}
+      aria-busy={loading}
     >
-      {loading ? "Cargando..." : children}
+      {loading ? "Cargando…" : children}
     </button>
   );
 }
 
-/** Enlace de navegación entre Login / Register */
+/**
+ * Navegación entre login y registro.
+ */
 export function AuthSwitch({ children }) {
   return (
     <p className="p220-auth-switch">
@@ -68,7 +153,17 @@ export function AuthSwitch({ children }) {
   );
 }
 
-/** Caja de error */
+/**
+ * Mensaje accesible de error.
+ */
 export function ErrorMsg({ children }) {
-  return <div className="p220-error-msg">{children}</div>;
+  return (
+    <div
+      className="p220-error-msg"
+      role="alert"
+      aria-live="polite"
+    >
+      {children}
+    </div>
+  );
 }
