@@ -18,6 +18,7 @@ _pycache__
 chroma
 
 
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
