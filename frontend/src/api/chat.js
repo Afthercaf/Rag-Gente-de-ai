@@ -12,8 +12,14 @@ export function sendChat(message, options = {}) {
 }
 
 export function getChatHistory(limit = 50) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
-  return apiRequest(`/chat/history?limit=${safeLimit}`);
+  const safeLimit = Math.max(
+    1,
+    Math.min(Number(limit) || 50, 100),
+  );
+
+  return apiRequest(
+    `/chat/history?limit=${safeLimit}`,
+  );
 }
 
 export function deleteChatHistory() {
@@ -22,31 +28,35 @@ export function deleteChatHistory() {
   });
 }
 
-export function placeOrder(pedido, userData, location) {
+export function placeOrder(
+  pedido,
+  data,
+  ubicacion,
+) {
   return apiRequest("/order", {
     method: "POST",
     body: {
-      pedido: String(pedido || "").trim(),
-      cliente_nombre: String(userData?.cliente_nombre || "").trim(),
-      telefono: String(userData?.telefono || "").trim(),
-      gmail: String(userData?.gmail || "").trim(),
-      direccion: String(userData?.direccion || "").trim(),
-      payment_method: String(
-        userData?.payment_method || "efectivo"
-      ).trim(),
-      ubicacion: location || null,
-
-      // No se envían user_id ni total.
-      // Ambos deben obtenerse/calcularse en el servidor.
+      pedido,
+      cliente_nombre: data.cliente_nombre,
+      telefono: data.telefono,
+      gmail: data.gmail,
+      direccion: data.direccion,
+      payment_method: data.payment_method,
+      ubicacion: ubicacion ?? null,
     },
   });
 }
 
 export function getOrderStatus(orderId) {
-  return apiRequest(`/order/${encodeURIComponent(orderId)}/status`);
+  return apiRequest(
+    `/order/${encodeURIComponent(orderId)}/status`,
+  );
 }
 
-export function cancelOrder(orderId, reason = "") {
+export function cancelOrder(
+  orderId,
+  reason = "",
+) {
   const query = reason
     ? `?reason=${encodeURIComponent(reason)}`
     : "";
@@ -56,6 +66,6 @@ export function cancelOrder(orderId, reason = "") {
     {
       method: "POST",
       body: {},
-    }
+    },
   );
 }
