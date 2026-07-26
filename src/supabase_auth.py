@@ -1,12 +1,12 @@
-# src/supabase_auth.py
-
-import os
+from __future__ import annotations
 import logging
+import os
+from typing import Any, Optional
+
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -14,113 +14,83 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL:
     raise ValueError("SUPABASE_URL no definida")
-
 if not SUPABASE_KEY:
     raise ValueError("SUPABASE_KEY no definida")
 
-HEADERS = {
+BASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
-    "Prefer": "return=representation"
 }
+RETURN_HEADERS = {**BASE_HEADERS, "Prefer": "return=representation"}
+USERS_ENDPOINT = f"{SUPABASE_URL}/rest/v1/users"
+TIMEOUT = (5, 20)
 
+def _safe_log(operation: str, response: requests.Response) -> None:
+    logger.info("%s STATUS=%s", operation, response.status_code)
 
-def register_user(
-    nombre: str,
-    telefono: str,
-    gmail: str,
-    direccion: str,
-    role: str = "cliente",
-    password_hash: str = ""
-):
+def register_user(nombre: str, telefono: str, gmail: str, direccion: str, role: str = "cliente", password_hash: str = "") -> Optional[dict[str, Any]]:
     try:
-        payload = {
-            "nombre": nombre,
-            "telefono": telefono,
-            "gmail": gmail.strip().lower(),
-            "direccion": direccion,
-            "role": role,
-            "password_hash": password_hash
-        }
-
         response = requests.post(
-            f"{SUPABASE_URL}/rest/v1/users",
-            headers=HEADERS,
-            json=payload
+            USERS_ENDPOINT,
+            headers=RETURN_HEADERS,
+            json={
+                "nombre": nombre,
+                "telefono": telefono,
+                "gmail": gmail.strip().lower(),
+                "direccion": direccion,
+                "role": role,
+                "password_hash": password_hash,
+            },
+            timeout=TIMEOUT,
         )
-
-        logger.info(f"REGISTER STATUS: {response.status_code}")
-        logger.info(response.text)
-
-        if response.status_code in (200, 201):
-            data = response.json()
-            return data[0] if data else None
-
-        return None
-
-    except Exception as e:
-        logger.exception(f"Error registrando usuario: {e}")
-        return None
-
-
-def login_user(gmail: str, password_hash: str):
-    try:
-        gmail = gmail.strip().lower()
-
-        params = {
-            "gmail": f"eq.{gmail}",
-            "password_hash": f"eq.{password_hash}",
-            "select": "*"
-        }
-
-        response = requests.get(
-            f"{SUPABASE_URL}/rest/v1/users",
-            headers=HEADERS,
-            params=params
-        )
-
-        logger.info(f"LOGIN STATUS: {response.status_code}")
-        logger.info(response.text)
-
-        if response.status_code != 200:
+        _safe_log("REGISTER", response)
+        if response.status_code not in (200, 201):
             return None
-
         data = response.json()
-
-        if not data:
-            logger.warning("Usuario o contraseña incorrectos")
-            return None
-
-        return data[0]
-
-    except Exception as e:
-        logger.exception(f"Error en login: {e}")
-        return None
-
-
-def get_user_by_gmail(gmail: str):
-    try:
-        gmail = gmail.strip().lower()
-
-        params = {
-            "gmail": f"eq.{gmail}",
-            "select": "*"
-        }
-
-        response = requests.get(
-            f"{SUPABASE_URL}/rest/v1/users",
-            headers=HEADERS,
-            params=params
-        )
-
-        if response.status_code != 200:
-            return None
-
-        data = response.json()
-
         return data[0] if data else None
-
-    except Exception as e:
-        logger.exception(f"Error obteniendo usuario: {e}")
+    except (requests.RequestException, ValueError, TypeError):
+        logger.exception("Error registrando usuario")
         return None
+
+def get_user_by_gmail(gmail: str) -> Optional[dict[str, Any]]:
+    try:
+        response = requests.get(
+            USERS_ENDPOINT,
+            headers=BASE_HEADERS,
+            params={
+                "gmail": f"eq.{gmail.strip().lower()}",
+                "select": "id,public_id,nombre,telefono,gmail,direccion,role,password_hash,created_at",
+                "limit": "1",
+            },
+            timeout=TIMEOUT,
+        )
+        _safe_log("GET_USER_BY_GMAIL", response)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        return data[0] if data else None
+    except (requests.RequestException, ValueError, TypeError):
+        logger.exception("Error obteniendo usuario")
+        return None
+
+def update_user_password_hash(user_id: int, password_hash: str) -> bool:
+    try:
+        response = requests.patch(
+            USERS_ENDPOINT,
+            headers=RETURN_HEADERS,
+            params={"id": f"eq.{int(user_id)}", "select": "id"},
+            json={"password_hash": password_hash},
+            timeout=TIMEOUT,
+        )
+        _safe_log("UPDATE_PASSWORD_HASH", response)
+        if response.status_code not in (200, 204):
+            return False
+        return True if response.status_code == 204 else bool(response.json())
+    except (requests.RequestException, ValueError, TypeError):
+        logger.exception("Error actualizando password_hash")
+        return False
+
+def login_user(gmail: str, password_hash: str | None = None):
+    logger.warning("login_user está obsoleto; usa get_user_by_gmail + verify_password")
+    return get_user_by_gmail(gmail)

@@ -1,5 +1,5 @@
 # routers/orders.py - Versión corregida
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from typing import Optional
 from datetime import datetime
 import logging
@@ -9,6 +9,7 @@ from schemas.order import OrderRequest, StatusUpdateRequest
 from services import order_service
 from services.session_service import get_user_session, clear_current_cart
 from core.decorators import measure_time
+from core.security import CurrentUser, get_current_user, require_roles
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +18,16 @@ router = APIRouter(prefix="/order", tags=["orders"])
 
 @router.post("")
 @measure_time
-async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks):
+async def create_new_order(
+    req: OrderRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     Crea una nueva orden.
     """
     logger.info(f"📝 [create_new_order] Recibiendo solicitud")
-    logger.info(f"   - user_id: {req.user_id}")
+    logger.info("   - user_uuid: %s", current_user.public_id)
     logger.info(f"   - payment_method: '{req.payment_method}'")
     logger.info(f"   - total: '{req.total}'")
     
@@ -31,7 +36,7 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
 
     try:
         result = await order_service.place_order(
-            user_id=req.user_id,
+            user_id=current_user.internal_id,
             cliente_nombre=req.cliente_nombre,
             telefono=req.telefono,
             gmail=req.gmail,
@@ -48,16 +53,16 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
             # La orden ya quedó persistida: cerrar el flujo conversacional.
             # Así una pregunta posterior no reutiliza el carrito anterior.
             try:
-                session = get_user_session(req.user_id)
-                clear_current_cart(session, req.user_id)
+                session = get_user_session(current_user.internal_id)
+                clear_current_cart(session, current_user.internal_id)
                 logger.info(
                     "🧹 [create_new_order] Carrito conversacional limpiado para user_id=%s",
-                    req.user_id,
+                    current_user.internal_id,
                 )
             except Exception as session_error:
                 logger.warning(
                     "No se pudo limpiar el carrito del usuario %s: %s",
-                    req.user_id,
+                    current_user.internal_id,
                     session_error,
                 )
 
@@ -84,7 +89,11 @@ async def create_new_order(req: OrderRequest, background_tasks: BackgroundTasks)
 
 @router.patch("/{order_id}/status")
 @measure_time
-async def patch_order_status(order_id: str, req: StatusUpdateRequest):
+async def patch_order_status(
+    order_id: str,
+    req: StatusUpdateRequest,
+    current_user: CurrentUser = Depends(require_roles("admin")),
+):
     """
     Actualiza el estado de una orden.
     """
@@ -109,7 +118,10 @@ async def patch_order_status(order_id: str, req: StatusUpdateRequest):
 
 @router.get("/{order_id}/status")
 @measure_time
-async def fetch_order_status(order_id: str):
+async def fetch_order_status(
+    order_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     Obtiene el estado de una orden.
     """
@@ -117,6 +129,8 @@ async def fetch_order_status(order_id: str):
         return {"success": False, "message": "Sistema no listo"}
 
     try:
+        import uuid
+        uuid.UUID(order_id)
         result = await order_service.fetch_status(order_id)
         return result
         
@@ -125,35 +139,36 @@ async def fetch_order_status(order_id: str):
         return {"success": False, "message": f"Error al obtener la orden: {str(e)}"}
 
 
-@router.get("/user/{user_id}")
+@router.get("/mine")
 @measure_time
-async def get_user_orders(user_id: int, limit: int = 10, offset: int = 0):
-    """
-    Obtiene todas las órdenes de un usuario.
-    """
-    if not state.get("ready", False):
-        return {"success": False, "message": "Sistema no listo"}
+async def get_my_orders(
+    limit: int = 10,
+    offset: int = 0,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    limit = max(1, min(limit, 50))
+    offset = max(0, offset)
 
-    try:
-        return {
-            "success": True,
-            "user_id": user_id,
-            "orders": [],
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": 0
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error obteniendo órdenes del usuario {user_id}: {e}")
-        return {"success": False, "message": f"Error al obtener las órdenes: {str(e)}"}
+    # Sustituir por order_service.list_by_user cuando exista.
+    return {
+        "success": True,
+        "user_id": str(current_user.public_id),
+        "orders": [],
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": 0,
+        },
+    }
 
 
 @router.post("/{order_id}/cancel")
 @measure_time
-async def cancel_order(order_id: str, reason: Optional[str] = None):
+async def cancel_order(
+    order_id: str,
+    reason: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     Cancela una orden.
     """
@@ -161,7 +176,16 @@ async def cancel_order(order_id: str, reason: Optional[str] = None):
         return {"success": False, "message": "Sistema no listo"}
 
     try:
-        result = await order_service.patch_status(order_id, "cancelado")
+        import uuid
+        uuid.UUID(order_id)
+
+        # IMPORTANTE: order_service.patch_status debe comprobar que
+        # order_id pertenece a current_user.internal_id.
+        result = await order_service.patch_status(
+            order_id,
+            "cancelado",
+            owner_user_id=current_user.internal_id,
+        )
         
         if result["success"]:
             return {

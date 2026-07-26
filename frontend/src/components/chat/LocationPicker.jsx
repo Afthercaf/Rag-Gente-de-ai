@@ -1,174 +1,372 @@
-import { useState, useEffect, useRef } from 'react';
-import '../../styles/theme.css';
+import { useEffect, useRef, useState } from "react";
 
-export default function LocationPicker({ onLocationSelect, onClose }) {
+import "../../styles/theme.css";
+
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
+export default function LocationPicker({
+  onLocationSelect,
+  onClose,
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState("");
   const [coordinates, setCoordinates] = useState(null);
+
   const hasSelected = useRef(false);
   const isMounted = useRef(true);
   const searchInputRef = useRef(null);
 
   useEffect(() => {
     isMounted.current = true;
-    return () => { isMounted.current = false; };
+
+    return () => {
+      isMounted.current = false;
+    };
   }, []);
 
+  const getAddressFromCoords = async (lat, lng) => {
+    try {
+      const params = new URLSearchParams({
+        lat: String(lat),
+        lng: String(lng),
+      });
+
+      const response = await fetch(
+        `${API_BASE_URL}/maps/reverse?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            "No se pudo obtener la dirección",
+        );
+      }
+
+      if (
+        data?.display_name &&
+        isMounted.current &&
+        !hasSelected.current
+      ) {
+        setAddress(data.display_name);
+      }
+    } catch (requestError) {
+      console.error(
+        "Error en geocodificación inversa:",
+        requestError,
+      );
+
+      if (isMounted.current) {
+        setError(
+          "No se pudo obtener la dirección exacta, pero puedes continuar.",
+        );
+
+        setAddress(`${lat}, ${lng}`);
+      }
+    }
+  };
+
   const getCurrentLocation = () => {
-    if (loading) return;
+    if (loading || hasSelected.current) {
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     if (!navigator.geolocation) {
-      setError('Tu navegador no soporta geolocalización');
+      setError(
+        "Tu navegador no soporta geolocalización.",
+      );
       setLoading(false);
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        if (!isMounted.current) return;
-        const { latitude, longitude } = position.coords;
-        setCoordinates({ lat: latitude, lng: longitude });
-        await getAddressFromCoords(latitude, longitude);
-        setLoading(false);
-      },
-      (err) => {
-        if (!isMounted.current) return;
-        let errorMessage = 'No se pudo obtener tu ubicación. ';
-        switch (err.code) {
-          case err.PERMISSION_DENIED:
-            errorMessage += 'Permite el acceso a la ubicación.'; break;
-          case err.POSITION_UNAVAILABLE:
-            errorMessage += 'Información de ubicación no disponible.'; break;
-          case err.TIMEOUT:
-            errorMessage += 'Tiempo de espera agotado.'; break;
-          default:
-            errorMessage += 'Intenta nuevamente.';
+        if (!isMounted.current) {
+          return;
         }
+
+        const { latitude, longitude } =
+          position.coords;
+
+        setCoordinates({
+          lat: latitude,
+          lng: longitude,
+        });
+
+        await getAddressFromCoords(
+          latitude,
+          longitude,
+        );
+
+        if (isMounted.current) {
+          setLoading(false);
+        }
+      },
+      (geolocationError) => {
+        if (!isMounted.current) {
+          return;
+        }
+
+        let errorMessage =
+          "No se pudo obtener tu ubicación. ";
+
+        switch (geolocationError.code) {
+          case geolocationError.PERMISSION_DENIED:
+            errorMessage +=
+              "Permite el acceso a la ubicación.";
+            break;
+
+          case geolocationError.POSITION_UNAVAILABLE:
+            errorMessage +=
+              "La información de ubicación no está disponible.";
+            break;
+
+          case geolocationError.TIMEOUT:
+            errorMessage +=
+              "Se agotó el tiempo de espera.";
+            break;
+
+          default:
+            errorMessage +=
+              "Intenta nuevamente.";
+        }
+
         setError(errorMessage);
         setLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      },
     );
   };
 
-  const getAddressFromCoords = async (lat, lng) => {
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=es`,
-        { headers: { 'Accept': 'application/json', 'User-Agent': 'Pizzeria220App/1.0' } }
-      );
-      const data = await response.json();
-      if (data.display_name && isMounted.current && !hasSelected.current) {
-        setAddress(data.display_name);
-      }
-    } catch (err) {
-      console.error('Error reverse geocoding:', err);
-      if (isMounted.current) {
-        setError('No se pudo obtener la dirección exacta, pero puedes continuar');
-        setAddress(`${lat}, ${lng}`);
-      }
-    }
-  };
-
   const searchAddress = async (searchText) => {
-    if (!searchText.trim() || loading) return;
+    const normalizedSearch = searchText.trim();
+
+    if (
+      !normalizedSearch ||
+      loading ||
+      hasSelected.current
+    ) {
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
     try {
+      const params = new URLSearchParams({
+        q: normalizedSearch,
+      });
+
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&limit=1&accept-language=es`,
-        { headers: { 'Accept': 'application/json', 'User-Agent': 'Pizzeria220App/1.0' } }
+        `${API_BASE_URL}/maps/search?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        },
       );
-      const results = await response.json();
-      if (results.length > 0 && isMounted.current) {
-        const first = results[0];
-        setCoordinates({ lat: parseFloat(first.lat), lng: parseFloat(first.lon) });
-        setAddress(first.display_name);
-      } else if (isMounted.current) {
-        setError('No se encontró la dirección. Intenta con términos más específicos.');
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            "No se pudo buscar la dirección",
+        );
       }
-    } catch (err) {
-      console.error('Error buscando dirección:', err);
-      if (isMounted.current) setError('Error al buscar la dirección. Intenta nuevamente.');
+
+      if (!isMounted.current) {
+        return;
+      }
+
+      if (
+        Number.isFinite(data?.lat) &&
+        Number.isFinite(data?.lng) &&
+        data?.display_name
+      ) {
+        setCoordinates({
+          lat: data.lat,
+          lng: data.lng,
+        });
+
+        setAddress(data.display_name);
+      } else {
+        setError(
+          "No se encontró la dirección. Usa términos más específicos.",
+        );
+      }
+    } catch (requestError) {
+      console.error(
+        "Error buscando dirección:",
+        requestError,
+      );
+
+      if (isMounted.current) {
+        setError(
+          "Error al buscar la dirección. Intenta nuevamente.",
+        );
+      }
     } finally {
-      if (isMounted.current) setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   };
 
   const handleConfirm = () => {
-    if (hasSelected.current) return;
-    if (coordinates && address) {
-      hasSelected.current = true;
-      onLocationSelect({
-        lat: coordinates.lat,
-        lng: coordinates.lng,
-        direccion_completa: address,
-        timestamp: new Date().toISOString(),
-      });
+    if (hasSelected.current) {
+      return;
+    }
+
+    if (!coordinates || !address) {
+      setError(
+        'Primero selecciona una ubicación mediante GPS o escribe una dirección.',
+      );
+      return;
+    }
+
+    hasSelected.current = true;
+
+    onLocationSelect({
+      lat: coordinates.lat,
+      lng: coordinates.lng,
+      direccion_completa: address,
+      timestamp: new Date().toISOString(),
+    });
+
+    onClose();
+  };
+
+  const handleClose = () => {
+    if (!loading && !hasSelected.current) {
       onClose();
-    } else {
-      setError('Primero selecciona una ubicación (usa "Usar mi ubicación" o escribe una dirección)');
     }
   };
 
   useEffect(() => {
     getCurrentLocation();
+    // Solo debe solicitar la ubicación al montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <div className="p220-loc-overlay">
-      <div className="p220-loc-modal">
+  const mapUrl = coordinates
+    ? `${API_BASE_URL}/maps/static?${new URLSearchParams({
+        lat: String(coordinates.lat),
+        lng: String(coordinates.lng),
+        zoom: "16",
+        width: "400",
+        height: "200",
+      }).toString()}`
+    : null;
 
-        {/* Header */}
+  return (
+    <div
+      className="p220-loc-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="location-picker-title"
+    >
+      <div className="p220-loc-modal">
         <div className="p220-loc-header">
-          <span className="p220-loc-title">📍 Selecciona tu ubicación</span>
+          <span
+            id="location-picker-title"
+            className="p220-loc-title"
+          >
+            📍 Selecciona tu ubicación
+          </span>
+
           <button
+            type="button"
             className="p220-close-btn"
-            onClick={() => { if (!loading && !hasSelected.current) onClose(); }}
+            onClick={handleClose}
             disabled={loading}
+            aria-label="Cerrar selector de ubicación"
           >
             ✕
           </button>
         </div>
 
-        {/* Body */}
         <div className="p220-loc-body">
-
-          {/* Botón GPS */}
           <button
+            type="button"
             className="p220-gps-btn"
-            style={{ opacity: loading || hasSelected.current ? 0.5 : 1 }}
+            style={{
+              opacity:
+                loading || hasSelected.current
+                  ? 0.5
+                  : 1,
+            }}
             onClick={getCurrentLocation}
-            disabled={loading || hasSelected.current}
+            disabled={
+              loading || hasSelected.current
+            }
           >
-            {loading ? '🔄 Obteniendo ubicación...' : '📍 Usar mi ubicación actual'}
+            {loading
+              ? "🔄 Obteniendo ubicación..."
+              : "📍 Usar mi ubicación actual"}
           </button>
 
-          {/* Búsqueda manual */}
           <div className="p220-loc-search-row">
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="O escribe tu dirección (ej: Calle Principal 123)"
+              placeholder="Ejemplo: Calle Principal 123"
               className="p220-loc-search-input"
-              style={{ opacity: loading || hasSelected.current ? 0.5 : 1 }}
-              disabled={loading || hasSelected.current}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !loading && !hasSelected.current) {
-                  searchAddress(e.target.value);
+              autoComplete="street-address"
+              style={{
+                opacity:
+                  loading || hasSelected.current
+                    ? 0.5
+                    : 1,
+              }}
+              disabled={
+                loading || hasSelected.current
+              }
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !loading &&
+                  !hasSelected.current
+                ) {
+                  event.preventDefault();
+                  searchAddress(event.currentTarget.value);
                 }
               }}
             />
+
             <button
+              type="button"
               className="p220-search-btn"
-              disabled={loading || hasSelected.current}
+              disabled={
+                loading || hasSelected.current
+              }
+              aria-label="Buscar dirección"
               onClick={() => {
-                if (searchInputRef.current?.value && !loading && !hasSelected.current) {
-                  searchAddress(searchInputRef.current.value);
+                const value =
+                  searchInputRef.current?.value;
+
+                if (value) {
+                  searchAddress(value);
                 }
               }}
             >
@@ -176,46 +374,74 @@ export default function LocationPicker({ onLocationSelect, onClose }) {
             </button>
           </div>
 
-          {/* Error */}
           {error && (
-            <div className="p220-loc-error">⚠️ {error}</div>
+            <div
+              className="p220-loc-error"
+              role="alert"
+            >
+              ⚠️ {error}
+            </div>
           )}
 
-          {/* Dirección seleccionada */}
           {address && (
             <div className="p220-loc-address-card">
-              <p className="p220-loc-address-label">📍 Dirección seleccionada:</p>
-              <p className="p220-loc-address-text">{address}</p>
+              <p className="p220-loc-address-label">
+                📍 Dirección seleccionada:
+              </p>
+
+              <p className="p220-loc-address-text">
+                {address}
+              </p>
             </div>
           )}
 
-          {/* Coordenadas */}
           {coordinates && (
             <div className="p220-loc-coords-card">
-              📌 Coordenadas: {coordinates.lat.toFixed(6)}, {coordinates.lng.toFixed(6)}
+              📌 Coordenadas:{" "}
+              {coordinates.lat.toFixed(6)},{" "}
+              {coordinates.lng.toFixed(6)}
             </div>
           )}
 
-          {/* Mapa estático */}
-          {coordinates && (
+          {mapUrl && (
             <img
-              src={`https://maps.locationiq.com/v3/staticmap?key=pk.5879fbb593bcbb0fea2d04f86e8933b8&center=${coordinates.lat},${coordinates.lng}&zoom=16&size=400x200&markers=${coordinates.lat},${coordinates.lng}`}
-              alt="Mapa de ubicación"
+              src={mapUrl}
+              alt="Mapa de la ubicación seleccionada"
               className="p220-loc-map"
-              onError={(e) => (e.target.style.display = 'none')}
+              onError={(event) => {
+                event.currentTarget.style.display =
+                  "none";
+              }}
             />
           )}
 
-          {/* Confirmar */}
           <button
-            className={`p220-confirm-btn${hasSelected.current ? ' is-done' : ''}`}
-            style={!hasSelected.current ? { opacity: !coordinates ? 0.5 : 1 } : undefined}
+            type="button"
+            className={`p220-confirm-btn${
+              hasSelected.current
+                ? " is-done"
+                : ""
+            }`}
+            style={
+              !hasSelected.current
+                ? {
+                    opacity: !coordinates
+                      ? 0.5
+                      : 1,
+                  }
+                : undefined
+            }
             onClick={handleConfirm}
-            disabled={!coordinates || hasSelected.current}
+            disabled={
+              !coordinates ||
+              hasSelected.current ||
+              loading
+            }
           >
-            {hasSelected.current ? '✓ Ubicación confirmada' : '✅ Confirmar ubicación'}
+            {hasSelected.current
+              ? "✓ Ubicación confirmada"
+              : "✅ Confirmar ubicación"}
           </button>
-
         </div>
       </div>
     </div>

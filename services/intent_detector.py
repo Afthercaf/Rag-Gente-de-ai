@@ -1231,7 +1231,16 @@ def _quantity_before_name(text: str, name: str) -> int:
     - ``mil pizzas de pepperoni``
     """
     n = _normalize(text)
-    target = re.escape(_normalize(name))
+
+    normalized_name = _normalize(name)
+    aliases = [normalized_name]
+    if normalized_name == "pastorera":
+        aliases.append("pastor")
+
+    target = "(?:" + "|".join(
+        re.escape(alias)
+        for alias in aliases
+    ) + ")"
 
     number_words = {
         "un": 1, "una": 1, "uno": 1,
@@ -1349,6 +1358,25 @@ def _requested_beverage_quantity(text: str) -> int:
     return 1
 
 
+def _is_one_of_each_order(text: str) -> bool:
+    """Detecta expresiones como 'una pizza de cada una del menú'."""
+    n = _normalize(text)
+    return bool(
+        re.search(
+            r"\b(?:una|1)\s+(?:pizza\s+)?de\s+cada\s+(?:una|tipo)\b",
+            n,
+        )
+        or re.search(
+            r"\b(?:una|1)\s+de\s+cada\s+(?:pizza|una)\b",
+            n,
+        )
+        or re.search(
+            r"\b(?:todas?|cada una)\s+las\s+pizzas\b",
+            n,
+        )
+    )
+
+
 def _extract_cart_items(text: str, pizza_names: list[str], context: str) -> tuple[list[dict], str | None]:
     """Extrae y EXPANDE cada pizza para poder asignar extras por unidad."""
     items: list[dict] = []
@@ -1364,6 +1392,24 @@ def _extract_cart_items(text: str, pizza_names: list[str], context: str) -> tupl
         menu_context = ""
     if not menu_context:
         menu_context = context
+
+    if _is_one_of_each_order(text):
+        for name in pizza_names:
+            price = _menu_pizza_price(name, menu_context)
+            if price is None:
+                return [], (
+                    f"No pude confirmar el precio de la Pizza {name}; "
+                    "no crearé el pedido hasta tener un precio válido."
+                )
+            items.append({
+                "pizza": name,
+                "unit": 1,
+                "base_price": price,
+                "extras": [],
+                "beverages": [],
+                "observation": "",
+            })
+        return items, None
 
     for name in sorted(pizza_names, key=len, reverse=True):
         qty = _quantity_before_name(text, name)
@@ -1737,13 +1783,23 @@ def _targeted_extras_prompt(cart: dict, extras_context: str) -> str:
         for pizza, quantity in counts.items()
     )
 
+    beverage = _beverage_catalog_item()
+    beverage_line = (
+        f"• {beverage['name']} — ${float(beverage['price']):.2f} MXN"
+        if beverage
+        else "• Coca-Cola 1.35L — $45.00 MXN"
+    )
+
     return LITERAL_RESPONSE_PREFIX + (
-        "Perfecto. Indica a cuáles pizzas deseas agregar extras, "
-        "cuántas unidades y cuáles extras.\n\n"
+        "Perfecto. Puedes agregar extras a las pizzas o refrescos al pedido.\n\n"
         f"{products}\n\n"
-        f"Extras disponibles:\n{_extras_menu_text(extras_context)}\n\n"
-        "Ejemplo: 2 Pepperoni con queso extra y 1 Pastorera "
-        "con orilla de queso."
+        f"Extras disponibles:\n{_extras_menu_text(extras_context)}\n"
+        "• Con todo — agrega todos los extras disponibles\n\n"
+        f"Bebidas disponibles:\n{beverage_line}\n\n"
+        "Ejemplos:\n"
+        "• 2 Pepperoni con queso extra y 1 Pastorera con orilla de queso.\n"
+        "• 1 Campirana con todo.\n"
+        "• Agrega 2 refrescos."
     )
 
 
@@ -1832,10 +1888,12 @@ def _apply_targeted_extras(
         )
 
     if applied == 0:
+        cart["status"] = "collecting_targeted_extras"
         return False, (
-            "No encontré una combinación válida de pizzas y extras. "
-            "Indica cantidad, pizza y extra; por ejemplo: "
-            "2 Pepperoni con queso extra."
+            "No encontré un extra válido para aplicar y tu pedido sigue abierto.\n\n"
+            + _extras_menu_text(extras_context)
+            + "\n\nIndica cantidad, pizza y un extra existente; por ejemplo: "
+            "1 Pepperoni con queso extra. También puedes responder No para continuar sin extras."
         )
 
     cart["cursor"] = len(items)
@@ -1849,7 +1907,7 @@ def _apply_targeted_extras(
 
 
 def _start_cart_response(cart: dict, extras_context: str) -> str:
-    """Inicia el flujo sin obligar a recorrer todas las pizzas innecesariamente."""
+    """Inicia siempre con una decisión Sí/No, incluso para una sola pizza."""
     items = cart.get("items", [])
     if not items:
         return LITERAL_RESPONSE_PREFIX + "No hay pizzas activas en el carrito."
@@ -1860,25 +1918,21 @@ def _start_cart_response(cart: dict, extras_context: str) -> str:
         counts[item["pizza"]] = counts.get(item["pizza"], 0) + 1
     base.extend(f"• {qty} × Pizza {name}" for name, qty in counts.items())
 
-    if len(items) > 1:
-        cart["status"] = "asking_any_extras"
+    cart["status"] = "asking_any_extras"
+
+    if len(items) == 1:
+        base.extend([
+            "",
+            "¿Deseas agregar extras a esta pizza?",
+            "Selecciona Sí para indicar cuáles extras deseas; o No para continuar sin extras. ➕",
+        ])
+    else:
         base.extend([
             "",
             "¿Deseas agregar extras a alguna de las pizzas?",
             "Selecciona Sí para indicar cuáles pizzas, cuántas y qué extras; o No para continuar sin extras. ➕",
         ])
-        return LITERAL_RESPONSE_PREFIX + "\n".join(base)
 
-    cart["status"] = "collecting_extras"
-    first = items[0]
-    base.extend([
-        "",
-        f"Ahora configuraremos los extras de la Pizza {first['pizza']}.",
-        "",
-        _extras_menu_text(extras_context),
-        "",
-        "¿Qué extra deseas para esta pizza? Puedes responder ninguno. ➕",
-    ])
     return LITERAL_RESPONSE_PREFIX + "\n".join(base)
 
 
@@ -2228,7 +2282,7 @@ def _recover_collecting_cart_from_history(
 
     recovered.clear()
     recovered.update({
-        "status": "collecting_extras",
+        "status": "asking_any_extras",
         "items": [{
             "pizza": pizza_name,
             "base_price": price,
@@ -2373,6 +2427,33 @@ def build_directive(
 
     # 5.1 Extras agrupados: el cliente indica pizza, cantidad y extras.
     if cart and cart.get("status") == "collecting_targeted_extras" and cart.get("items"):
+        requested_beverages = _find_requested_beverages(question, context)
+
+        if requested_beverages:
+            added = requested_beverages[0]
+            existing = cart.get("beverages", [])
+            previous_quantity = sum(
+                int(item.get("quantity", 1))
+                for item in existing
+            )
+            added_quantity = int(added.get("quantity", 1))
+            total_quantity = previous_quantity + added_quantity
+
+            cart["beverages"] = [{
+                "name": added["name"],
+                "price": added["price"],
+                "quantity": total_quantity,
+            }]
+            cart["status"] = "collecting_targeted_extras"
+
+            return LITERAL_RESPONSE_PREFIX + (
+                f"🥤 Agregué {added_quantity} × {added['name']} al pedido.\n"
+                f"Total de refrescos: {total_quantity}.\n\n"
+                "Ahora puedes indicar los extras de las pizzas, usar "
+                "'con todo' para una pizza específica o responder No "
+                "para continuar sin agregar más extras."
+            )
+
         if is_no_in_order_flow(question) or _is_skip_extras_answer(question):
             for item in cart["items"]:
                 item["extras"] = []
@@ -2467,7 +2548,7 @@ def build_directive(
 
             cart.clear()
             cart.update({
-                "status": "collecting_extras",
+                "status": "asking_any_extras",
                 "items": [{
                     "pizza": referenced_pizza,
                     "base_price": price,
@@ -2480,10 +2561,7 @@ def build_directive(
                 "user_id": user_id,
             })
 
-            return LITERAL_RESPONSE_PREFIX + _first_item_extras_prompt(
-                cart,
-                extras_context,
-            )
+            return _start_cart_response(cart, extras_context)
 
     # 8. Preguntas informativas sobre una pizza nunca crean carrito.
     if _is_informational_pizza_question(question, pizza_names):

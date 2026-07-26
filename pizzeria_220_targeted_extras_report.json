@@ -1,0 +1,51 @@
+{
+  "summary": {
+    "total": 6,
+    "passed": 4,
+    "failed": 2
+  },
+  "results": [
+    {
+      "step": "registrar seis pizzas",
+      "passed": true,
+      "message": "2 de Pepperoni, 3 de Pastorera y 1 Mexicana",
+      "reply": "Registré 6 pizzas:\n• 2 × Pizza Pepperoni\n• 3 × Pizza Pastorera\n• 1 × Pizza Mexicana\n\n¿Deseas agregar extras a alguna de las pizzas?\nSelecciona Sí para indicar cuáles pizzas, cuántas y qué extras; o No para continuar sin extras. ➕",
+      "reason": "Debe registrar seis pizzas y preguntar si se agregarán extras."
+    },
+    {
+      "step": "seleccionar sí",
+      "passed": false,
+      "message": "sí",
+      "reply": "Perfecto. Indica a cuáles pizzas deseas agregar extras, cuántas unidades y cuáles extras.\n\n• 2 × Pizza Pepperoni\n• 3 × Pizza Pastorera\n• 1 × Pizza Mexicana\n\nExtras disponibles:\n• Queso extra — $45.00 MXN\n• Orilla de queso — $50.00 MXN\n• pepperoni — $45.00 MXN\n• pimiento — $45.00 MXN\n• cebolla — $45.00 MXN\n• aceitunas y atún — $45.00 MXN\n\nEjemplo: 2 Pepperoni con queso extra y 1 Pastorera con orilla de queso.",
+      "reason": "Sí debe pedir pizza, cantidad y extras en una sola instrucción, mostrar todos los extras con sus precios y no recorrer unidad por unidad."
+    },
+    {
+      "step": "aplicar extras agrupados",
+      "passed": false,
+      "message": "2 Pepperoni con queso extra y 1 Pastorera con orilla de queso",
+      "reply": "Extras aplicados correctamente:\n• 2 × Pizza Pepperoni: Queso extra, pepperoni\n• 1 × Pizza Pastorera: Orilla de queso\n\n✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 6\nProductos:\n• 2 × Pizza Pepperoni — $230.00\n  Extras por pizza: Queso extra ($45.00), pepperoni ($45.00)\n• 1 × Pizza Pastorera — $220.00\n  Extras por pizza: Orilla de queso ($50.00)\n• 2 × Pizza Pastorera — $440.00\n  Extras: Ninguno\n• 1 × Pizza Mexicana — $180.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $1300.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe aplicar queso extra a dos Pepperoni, orilla a una Pastorera y calcular $1210.00."
+    },
+    {
+      "step": "cancelar pedido de prueba",
+      "passed": true,
+      "message": "cancelar",
+      "reply": "✅ Pedido cancelado. ¿Quieres ver el menú? 🍕",
+      "reason": "Debe permitir cancelar el pedido después de probar el flujo."
+    },
+    {
+      "step": "crear pedido para opción no",
+      "passed": true,
+      "message": "2 pizzas Margarita",
+      "reply": "Registré 2 pizzas:\n• 2 × Pizza Margarita\n\n¿Deseas agregar extras a alguna de las pizzas?\nSelecciona Sí para indicar cuáles pizzas, cuántas y qué extras; o No para continuar sin extras. ➕",
+      "reason": "Debe preguntar por extras."
+    },
+    {
+      "step": "seleccionar no",
+      "passed": true,
+      "message": "no",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 2\nProductos:\n• 2 × Pizza Margarita — $210.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $210.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "No debe continuar sin extras y mostrar el resumen de $210.00."
+    }
+  ]
+}

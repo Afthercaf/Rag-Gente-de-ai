@@ -2,13 +2,14 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from core.cache import response_cache
 from core.decorators import measure_time
 from core.state import state
-from schemas.chat import ChatRequest, QuickReplyRequest
+from pydantic import BaseModel, ConfigDict, Field
+from core.security import CurrentUser, get_current_user
 from services import llm_service, rag_service
 from services.intent_detector import (
     has_order_intent,
@@ -107,12 +108,30 @@ def _normalize_pizza_display_name(name: str) -> str:
     return f"Pizza {cleaned}"
 
 
+
+class SecureChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    message: str = Field(min_length=1, max_length=2000)
+    use_cache: bool = True
+    save_history: bool = True
+
+
+class SecureQuickReplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    message: str = Field(min_length=1, max_length=500)
+
+
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("")
 @measure_time
-async def chat(req: ChatRequest):
+async def chat(
+    req: SecureChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Chat con memoria por usuario + RAG contextual (robusto)."""
     if not state["ready"]:
         print("⏳ [CHAT] Sistema NO listo - inicializando...")
@@ -126,8 +145,8 @@ async def chat(req: ChatRequest):
         print("⚠️ [CHAT] Mensaje vacío")
         return JSONResponse(content={"reply": ""})
 
-    session = get_user_session(req.user_id)
-    print(f"👤 Usuario: {req.user_id} | 🧠 Historial: {len(session['history'])} msgs")
+    session = get_user_session(current_user.internal_id)
+    print(f"👤 Usuario: {current_user.internal_id} | 🧠 Historial: {len(session['history'])} msgs")
 
     # ── Pizzas del RAG (robusto: nunca lanza) ───────────────────────
     try:
@@ -153,32 +172,32 @@ async def chat(req: ChatRequest):
     # una solicitud de menú o cualquier otra intención válida y no debe
     # ser reemplazado automáticamente por la bienvenida.
     if is_greeting and not flow_active:
-        welcome = await _build_welcome(req, session, pizza_names)
+        welcome = await _build_welcome(req, session, pizza_names, current_user)
         if welcome is not None:
             if req.save_history:
-                append_to_history(session, req.user_id, query, welcome)
+                append_to_history(session, current_user.internal_id, query, welcome)
             return JSONResponse(content={
                 "reply": welcome,
                 "is_order": False,
             })
 
     # ── BUG 1: Repetir último pedido ────────────────────────────────
-    last_order = get_last_order(session, req.user_id)
+    last_order = get_last_order(session, current_user.internal_id)
     if _is_repeat_phrase(query) and last_order and last_order.is_valid():
-        return await _handle_repeat_order(req, session, last_order)
+        return await _handle_repeat_order(req, session, last_order, current_user)
 
     # ── BUG 3: Prioridad absoluta del flujo de pedido ────────────────
     # Si hay un flujo activo, NO consultamos RAG ni promociones. Usamos
     # únicamente el menú cacheado (con precios) para dar contexto al LLM
     # y seguimos exactamente donde quedó el flujo.
     if flow_active:
-        return await _handle_active_flow(req, session, pizza_names, query)
+        return await _handle_active_flow(req, session, pizza_names, query, current_user)
 
     # ── Flujo normal (sin pedido activo) ────────────────────────────
     cache_key = None
     cache_allowed = req.use_cache and not _is_session_flow_active(session, pizza_names)
     if cache_allowed:
-        cache_key = get_cache_key(query, req.user_id)
+        cache_key = get_cache_key(query, current_user.internal_id)
         cached = response_cache.get(cache_key)
         if cached:
             print("📦 [CHAT] Respuesta desde caché")
@@ -211,11 +230,11 @@ async def chat(req: ChatRequest):
             question=query,
             history=session["history"],
             session=session,           # ← NUEVO: pasar sesión
-            user_id=req.user_id,       # ← NUEVO: pasar user_id
+            user_id=current_user.internal_id,       # ← NUEVO: pasar user_id
         )
 
         if req.save_history:
-            append_to_history(session, req.user_id, query, content)
+            append_to_history(session, current_user.internal_id, query, content)
 
         is_order, order_details = llm_service.extract_order_details(content)
 
@@ -230,14 +249,14 @@ async def chat(req: ChatRequest):
                     observaciones=order_details.get("observaciones", "") or "",
                     total=order_details.get("total", ""),
                 )
-                set_last_order(session, confirmed, req.user_id)
+                set_last_order(session, confirmed, current_user.internal_id)
                 print(f"💾 [LAST_ORDER] Guardado: {confirmed.producto} x{confirmed.cantidad}")
 
         result = {
             "reply": content,
             "is_order": is_order,
             "order_details": order_details,
-            "user_id": req.user_id,
+            "user_id": str(current_user.public_id),
         }
         if cache_allowed and cache_key is not None:
             response_cache.set(cache_key, result)
@@ -256,20 +275,20 @@ async def chat(req: ChatRequest):
                 question=query,
                 history=session["history"],
                 session=session,           # ← NUEVO: pasar sesión
-                user_id=req.user_id,       # ← NUEVO: pasar user_id
+                user_id=current_user.internal_id,       # ← NUEVO: pasar user_id
             )
             if req.save_history:
-                append_to_history(session, req.user_id, query, fallback)
+                append_to_history(session, current_user.internal_id, query, fallback)
             return JSONResponse(content={
                 "reply": fallback,
                 "is_order": False,
-                "user_id": req.user_id,
+                "user_id": str(current_user.public_id),
             })
         except Exception:
             return JSONResponse(content={
                 "reply": "Lo siento, tuve un problema procesando tu mensaje. ¿Podrías reformularlo?",
                 "is_order": False,
-                "user_id": req.user_id,
+                "user_id": str(current_user.public_id),
             })
 
 
@@ -277,7 +296,7 @@ async def chat(req: ChatRequest):
 # BUG 1: Repetir último pedido confirmado
 # ═══════════════════════════════════════════════════════════════════
 
-async def _handle_repeat_order(req: ChatRequest, session: dict, last_order: LastOrder):
+async def _handle_repeat_order(req: SecureChatRequest, session: dict, last_order: LastOrder, current_user: CurrentUser):
     """Reconstruye el último pedido y pregunta si confirmar de nuevo."""
     print(f"🔁 [REPEAT] Cliente quiere repetir: {last_order.producto}")
     lines = [
@@ -298,12 +317,12 @@ async def _handle_repeat_order(req: ChatRequest, session: dict, last_order: Last
     content = "\n".join(lines)
 
     if req.save_history:
-        append_to_history(session, req.user_id, req.message, content)
+        append_to_history(session, current_user.internal_id, req.message, content)
     return JSONResponse(content={
         "reply": content,
         "is_order": True,
         "order_details": last_order.to_dict(),
-        "user_id": req.user_id,
+        "user_id": str(current_user.public_id),
     })
 
 
@@ -311,7 +330,7 @@ async def _handle_repeat_order(req: ChatRequest, session: dict, last_order: Last
 # BUG 3: Manejo del flujo activo (sin RAG, sin promos)
 # ═══════════════════════════════════════════════════════════════════
 
-async def _handle_active_flow(req: ChatRequest, session: dict, pizza_names: list, query: str):
+async def _handle_active_flow(req: SecureChatRequest, session: dict, pizza_names: list, query: str, current_user: CurrentUser):
     """El flujo de pedido tiene prioridad absoluta: sin RAG ni promociones."""
     print(f"🔒 [FLOW] Flujo activo — RAG/promos omitidos por prioridad de flujo")
     # Inyectar SOLO el menú con precios para que el LLM tenga contexto de
@@ -327,10 +346,10 @@ async def _handle_active_flow(req: ChatRequest, session: dict, pizza_names: list
             question=query,
             history=session["history"],
             session=session,           # ← NUEVO: pasar sesión
-            user_id=req.user_id,       # ← NUEVO: pasar user_id
+            user_id=current_user.internal_id,       # ← NUEVO: pasar user_id
         )
         if req.save_history:
-            append_to_history(session, req.user_id, query, content)
+            append_to_history(session, current_user.internal_id, query, content)
         is_order, order_details = llm_service.extract_order_details(content)
 
         # Guardar último pedido confirmado si aplica
@@ -344,13 +363,13 @@ async def _handle_active_flow(req: ChatRequest, session: dict, pizza_names: list
                     observaciones=order_details.get("observaciones", "") or "",
                     total=order_details.get("total", ""),
                 )
-                set_last_order(session, confirmed, req.user_id)
+                set_last_order(session, confirmed, current_user.internal_id)
 
         return JSONResponse(content={
             "reply": content,
             "is_order": is_order,
             "order_details": order_details,
-            "user_id": req.user_id,
+            "user_id": str(current_user.public_id),
         })
     except Exception as e:
         import traceback
@@ -359,7 +378,7 @@ async def _handle_active_flow(req: ChatRequest, session: dict, pizza_names: list
         return JSONResponse(content={
             "reply": "¿En qué puedo continuar con tu pedido?",
             "is_order": True,
-            "user_id": req.user_id,
+            "user_id": str(current_user.public_id),
         })
 
 
@@ -367,14 +386,14 @@ async def _handle_active_flow(req: ChatRequest, session: dict, pizza_names: list
 # BUG 5: Bienvenida inteligente
 # ═══════════════════════════════════════════════════════════════════
 
-async def _build_welcome(req: ChatRequest, session: dict, pizza_names: list) -> Optional[str]:
+async def _build_welcome(req: SecureChatRequest, session: dict, pizza_names: list, current_user: CurrentUser) -> Optional[str]:
     """Construye la bienvenida según si el usuario tiene pedidos previos.
 
     Devuelve None si no aplica (para que el flujo normal continúe).
     Caso A (tiene pedido previo): muestra último pedido + ofrece repetir.
     Caso B (nuevo): muestra producto más vendido + menú completo.
     """
-    last_order = get_last_order(session, req.user_id)
+    last_order = get_last_order(session, current_user.internal_id)
 
     # Esperar a que el menú esté cargado antes de mostrarlo (BUG 2):
     # si el menú aún no está listo, damos una bienvenida breve sin precios
@@ -434,7 +453,10 @@ async def _build_welcome(req: ChatRequest, session: dict, pizza_names: list) -> 
 
 
 @router.post("/quick")
-async def quick_reply(req: QuickReplyRequest):
+async def quick_reply(
+    req: SecureQuickReplyRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Respuestas rápidas predefinidas; cae en /chat si no hay match."""
     query = req.message.lower().strip()
 
@@ -468,27 +490,37 @@ async def quick_reply(req: QuickReplyRequest):
         if key in query:
             return {"reply": response, "is_order": False, "quick": True}
 
-    return await chat(ChatRequest(user_id=0, message=req.message))
+    return await chat(
+        SecureChatRequest(message=req.message),
+        current_user,
+    )
 
 
-@router.get("/history/{user_id}")
-async def history(user_id: int, limit: int = 50):
-    """Obtiene el historial de conversación del usuario desde Supabase."""
-    messages = get_chat_history(user_id, limit=limit)
+@router.get("/history")
+async def history(
+    limit: int = 50,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    limit = max(1, min(limit, 100))
+    messages = get_chat_history(current_user.internal_id, limit=limit)
     return JSONResponse({
-        "user_id": user_id,
+        "user_id": str(current_user.public_id),
         "messages_count": len(messages),
         "history": messages,
     })
 
 
-@router.delete("/history/{user_id}")
-async def delete_history(user_id: int):
-    """Elimina el historial de conversación del usuario en Supabase."""
-    success = delete_chat_history(user_id)
-    clear_last_order(get_user_session(user_id), user_id)
+@router.delete("/history")
+async def delete_history(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    success = delete_chat_history(current_user.internal_id)
+    clear_last_order(
+        get_user_session(current_user.internal_id),
+        current_user.internal_id,
+    )
     return JSONResponse({
         "status": "ok" if success else "error",
-        "user_id": user_id,
+        "user_id": str(current_user.public_id),
         "deleted": success,
     })

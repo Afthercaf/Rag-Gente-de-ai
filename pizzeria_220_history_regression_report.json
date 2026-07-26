@@ -1,0 +1,107 @@
+{
+  "summary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0
+  },
+  "results": [
+    {
+      "scenario": "saludo con pedido no muestra bienvenida",
+      "passed": true,
+      "message": "Hola quiero 20 pizzas Margarita sin extras",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 20\nProductos:\n• 20 × Pizza Margarita — $2100.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $2100.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe procesar el pedido aunque comience con Hola"
+    },
+    {
+      "scenario": "cantidad con de",
+      "passed": true,
+      "message": "Quiero 2 pizzas de pepperoni",
+      "reply": "Registré 2 pizzas:\n• 2 × Pizza Pepperoni\n\n¿Deseas agregar extras a alguna de las pizzas?\nResponde sí para configurarlas una por una, o no para continuar sin extras. ➕",
+      "reason": "Debe registrar 2 pizzas y no interpretar pepperoni como extra"
+    },
+    {
+      "scenario": "cantidad escrita mil",
+      "passed": true,
+      "message": "Quiero mil pizzas de pepperoni",
+      "reply": "Por el chat puedo registrar hasta 20 pizzas por pedido. Para una cantidad mayor se requiere una cotización especial.",
+      "reason": "Mil debe activar el límite de cantidad"
+    },
+    {
+      "scenario": "cantidad numérica 1000",
+      "passed": true,
+      "message": "Quiero 1000 pizzas de pepperoni",
+      "reply": "Por el chat puedo registrar hasta 20 pizzas por pedido. Para una cantidad mayor se requiere una cotización especial.",
+      "reason": "1000 debe activar el límite de cantidad"
+    },
+    {
+      "scenario": "cantidades múltiples por producto",
+      "passed": true,
+      "message": "2 de campirana, 1 mexicana y 2 de pepperoni",
+      "reply": "Registré 5 pizzas:\n• 2 × Pizza Pepperoni\n• 2 × Pizza Campirana\n• 1 × Pizza Mexicana\n\n¿Deseas agregar extras a alguna de las pizzas?\nResponde sí para configurarlas una por una, o no para continuar sin extras. ➕",
+      "reason": "Debe conservar las 5 pizzas, no convertir Pepperoni en extra y continuar al paso de extras o confirmación."
+    },
+    {
+      "scenario": "pizza repetida suma cantidad",
+      "passed": true,
+      "message": "Dame una pizza mexicana con pimiento y una pizza mexicana",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 2\nProductos:\n• 2 × Pizza Mexicana — $360.00\n  Extras por pizza: pimiento ($45.00)\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $450.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Dos menciones de Mexicana deben sumar 2"
+    },
+    {
+      "scenario": "iniciar pedido para bebidas acumulables",
+      "passed": true,
+      "message": "Pizza Margarita",
+      "reply": "Registré 1 pizza:\n• 1 × Pizza Margarita\n\nAhora configuraremos los extras de la Pizza Margarita.\n\n• Queso extra — $45.00 MXN\n• Orilla de queso — $50.00 MXN\n• pepperoni — $45.00 MXN\n• pimiento — $45.00 MXN\n• cebolla — $45.00 MXN\n• aceitunas y atún — $45.00 MXN\n\n¿Qué extra deseas para esta pizza? Puedes responder ninguno. ➕",
+      "reason": "Debe iniciar el pedido"
+    },
+    {
+      "scenario": "cerrar extras",
+      "passed": true,
+      "message": "ninguno",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 1\nProductos:\n• 1 × Pizza Margarita — $105.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $105.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe mostrar resumen"
+    },
+    {
+      "scenario": "agregar primer refresco",
+      "passed": true,
+      "message": "Agrega 1 refresco",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 1\nProductos:\n• 1 × Pizza Margarita — $105.00\n  Extras: Ninguno\n\nBebidas del pedido: 1 × Coca-Cola 1.35L ($45.00 c/u)\nTamaño: Grande\nTotal: $150.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe tener un refresco"
+    },
+    {
+      "scenario": "agregar dos refrescos más",
+      "passed": true,
+      "message": "Mejor agrega 2 refrescos más",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 1\nProductos:\n• 1 × Pizza Margarita — $105.00\n  Extras: Ninguno\n\nBebidas del pedido: 3 × Coca-Cola 1.35L ($45.00 c/u)\nTamaño: Grande\nTotal: $240.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe acumular 1 + 2 refrescos sin cancelar"
+    },
+    {
+      "scenario": "extra negado no se cobra",
+      "passed": true,
+      "message": "Dame una pizza Margarita con queso extra pero quítale el queso",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 1\nProductos:\n• 1 × Pizza Margarita — $105.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $105.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "La negación posterior debe eliminar el queso extra y cerrar el pedido en $105.00"
+    },
+    {
+      "scenario": "crear pedido cancelable",
+      "passed": true,
+      "message": "Quiero 2 pizzas de pepperoni sin extras",
+      "reply": "✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 2\nProductos:\n• 2 × Pizza Pepperoni — $230.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $230.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": "Debe crear resumen"
+    },
+    {
+      "scenario": "no quiero cancela en confirmación",
+      "passed": true,
+      "message": "No quiero 2 pizzas de pepperoni",
+      "reply": "✅ Pedido cancelado. ¿Quieres ver el menú? 🍕",
+      "reason": "Una negativa explícita debe cancelar el pedido pendiente"
+    },
+    {
+      "scenario": "pedido mixto con producto fuera del menú",
+      "passed": true,
+      "message": "2 de campirana, 1 mexicana y 2 de pepperoni y una hamburguesa con papas con queso",
+      "reply": "No agregaré hamburguesa y papas porque no pertenece al menú. Solo registraré las pizzas válidas que mencionaste.\n\nRegistré 5 pizzas:\n• 2 × Pizza Pepperoni\n• 2 × Pizza Campirana\n• 1 × Pizza Mexicana\n\n¿Deseas agregar extras a alguna de las pizzas?\nResponde sí para configurarlas una por una, o no para continuar sin extras. ➕",
+      "reason": "Debe registrar 5 pizzas válidas, ignorar hamburguesa y papas, no convertir Pepperoni en extra y no filtrar marcadores internos."
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "target": "https://killerexpert10.tail29c8ce.ts.net",
+  "generated": "2026-07-25T07:47:49",
+  "results": [
+    {
+      "finding_id": "C-001",
+      "title": "Sin autenticación en endpoints sensibles",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /order → 401\nGET /chat/history → 401\nGET /voice/history → 401\nGET /cache/stats → 401",
+      "remediation": "Exigir JWT Bearer en chat, órdenes, voz, caché y datos privados."
+    },
+    {
+      "finding_id": "C-002",
+      "title": "Contraseña expuesta o tratada como texto reutilizable",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /auth/register incompleto → 422; la respuesta no reexpuso la contraseña ni campos sensibles.",
+      "remediation": "No incluir input/password en errores; aplicar Argon2id en el servidor."
+    },
+    {
+      "finding_id": "C-003",
+      "title": "IDOR y ownership controlado por el cliente",
+      "severity": "CRITICAL",
+      "status": "FAIL",
+      "evidence": "GET /chat/history/1 → 404\nGET /order/user/1 → 404\nGET /order/user/9999 → 404\nPOST /order autenticado con user_id ajeno → 200",
+      "remediation": "Eliminar user_id del cliente y derivarlo exclusivamente del JWT."
+    },
+    {
+      "finding_id": "C-004",
+      "title": "Precio generado por IA usado como valor real",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /order con total=0 controlado por cliente → 422",
+      "remediation": "Rechazar total del cliente y recalcular desde el catálogo server-side."
+    },
+    {
+      "finding_id": "C-005",
+      "title": "Contraseña o password_hash en respuesta de registro",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /auth/register → 201; valor expuesto=False; campo sensible=False",
+      "remediation": "Responder solo con campos públicos del usuario; nunca password_hash."
+    },
+    {
+      "finding_id": "C-006",
+      "title": "API key de LocationIQ expuesta",
+      "severity": "CRITICAL",
+      "status": "FAIL",
+      "evidence": "Se detectó una referencia de LocationIQ con clave en el bundle.",
+      "remediation": "Mover la integración al backend y eliminar claves del bundle cliente."
+    },
+    {
+      "finding_id": "C-007",
+      "title": "QR o URL de pago generada por la IA",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /chat → 200; campos accionables=False; URL de pago detectada=False",
+      "remediation": "Generar enlaces y QR únicamente en backend vinculados a una orden."
+    },
+    {
+      "finding_id": "C-008",
+      "title": "Tool results con PII sin sanitización",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /chat → 200; correos ajenos detectados=0; teléfonos detectados=1",
+      "remediation": "Aplicar allowlist de campos y enmascarar PII antes de enviar al LLM."
+    },
+    {
+      "finding_id": "C-009",
+      "title": "Voz y observabilidad sin autenticación",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "GET /voice/history → 401\nGET /voice/stats → 401\nGET /observability/logs → 404\nGET /observability/stats → 404",
+      "remediation": "Exigir autenticación y rol administrativo donde corresponda."
+    },
+    {
+      "finding_id": "C-010",
+      "title": "Cache clear sin autorización",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /cache/clear sin token → 401",
+      "remediation": "Requerir JWT y rol admin para limpiar caché."
+    },
+    {
+      "finding_id": "C-011",
+      "title": "Rate limiting ausente",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "12 intentos de login inválido: 401×4, 429×8; 429 presente=True",
+      "remediation": "Login/register: 5/min por IP; chat 30/min; órdenes 10/min."
+    },
+    {
+      "finding_id": "C-012",
+      "title": "CORS refleja cualquier origen",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "OPTIONS /chat → 403; ACAO=[ausente]; ACAC=[ausente]",
+      "remediation": "Usar allowlist exacta y no habilitar credentials con orígenes arbitrarios."
+    },
+    {
+      "finding_id": "C-013",
+      "title": "AI actúa como proxy no autorizado",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "POST /chat con user_id inyectado → 422; confirmación de acción ajena=False",
+      "remediation": "Rechazar user_id extra y fijar ownership desde el JWT en cada tool."
+    },
+    {
+      "finding_id": "C-014",
+      "title": "Acumulación multi-turn de PII",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "Estados=[200, 200, 200, 200]; correos ajenos únicos=0; teléfonos únicos=1",
+      "remediation": "Limitar extracción, filtrar PII y detectar scraping conversacional."
+    },
+    {
+      "finding_id": "C-015",
+      "title": "SHA-256 sin salt en almacenamiento de contraseñas",
+      "severity": "CRITICAL",
+      "status": "WARNING",
+      "evidence": "No fue posible importar core.password_security: No module named 'core'\nNo fue posible consultar password_hash. Configura SUPABASE_URL y SUPABASE_KEY o ejecuta la prueba local.",
+      "remediation": "Usar Argon2id server-side y salt aleatorio por contraseña."
+    },
+    {
+      "finding_id": "C-016",
+      "title": "Totales o métodos de pago inválidos",
+      "severity": "CRITICAL",
+      "status": "PASS",
+      "evidence": "Respuestas para método inválido, total negativo y total nulo: 422, 422, 422",
+      "remediation": "Whitelist de métodos y total calculado exclusivamente server-side."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+============================================================
+SECURITY REGRESSION TEST SUMMARY
+============================================================
+Target: https://killerexpert10.tail29c8ce.ts.net
+Timestamp: 2026-07-25T07:47:49
+
+Total Tests: 16
+Passed: 13
+Failed: 2
+Warnings: 1
+Skipped: 0
+Pass Rate: 81.2%
+Critical Failures: 2
+
+FAILED TESTS:
+----------------------------------------
+[CRITICAL] C-003: IDOR y ownership controlado por el cliente
+  Evidence: GET /chat/history/1 → 404
+GET /order/user/1 → 404
+GET /order/user/9999 → 404
+POST /order autenticado con user_id ajeno → 200
+  Fix: Eliminar user_id del cliente y derivarlo exclusivamente del JWT.
+
+[CRITICAL] C-006: API key de LocationIQ expuesta
+  Evidence: Se detectó una referencia de LocationIQ con clave en el bundle.
+  Fix: Mover la integración al backend y eliminar claves del bundle cliente.
+
+🚫 NOT PRODUCTION READY

@@ -3,13 +3,16 @@
 # Instalar: pip install faster-whisper
 # Requiere: ffmpeg instalado en el sistema (winget install ffmpeg)
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
 import tempfile
 import os
 import json
 from datetime import datetime
 from typing import Optional
+import uuid
+
+from core.security import CurrentUser, get_current_user, require_roles
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -45,13 +48,13 @@ def load_transcriptions() -> list:
             return []
     return []
 
-def save_transcription(text: str, language: str, user_id: Optional[str] = None):
+def save_transcription(text: str, language: str, user_id: str):
     """Guarda una transcripción en el archivo JSON"""
     transcriptions = load_transcriptions()
     
     # Crear entrada
     entry = {
-        "id": len(transcriptions) + 1,
+        "id": str(uuid.uuid4()),
         "text": text,
         "language": language,
         "user_id": user_id,
@@ -87,7 +90,7 @@ def get_transcriptions(limit: int = 10) -> list:
 async def transcribe_audio(
     audio: UploadFile = File(...),
     language: str = Form(default="es"),
-    user_id: Optional[str] = Form(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     audio_bytes = await audio.read()
 
@@ -95,7 +98,32 @@ async def transcribe_audio(
     print(f"📦 filename: {audio.filename}")
     print(f"📦 tamaño: {len(audio_bytes)} bytes")
     print(f"📦 language: {language}")
-    print(f"📦 user_id: {user_id}")
+    print(f"📦 user_uuid: {current_user.public_id}")
+
+    allowed_audio_types = {
+        "audio/webm",
+        "audio/webm;codecs=opus",
+        "audio/ogg",
+        "audio/ogg;codecs=opus",
+        "audio/wav",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/m4a",
+        "audio/x-m4a",
+    }
+    normalized_content_type = (audio.content_type or "").lower()
+
+    if normalized_content_type not in allowed_audio_types:
+        raise HTTPException(
+            status_code=415,
+            detail="Tipo de audio no permitido",
+        )
+
+    if len(audio_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail="El audio supera 10 MB",
+        )
 
     if len(audio_bytes) < 100:
         return JSONResponse(
@@ -161,7 +189,7 @@ async def transcribe_audio(
             save_transcription(
                 text=text,
                 language=language,
-                user_id=user_id
+                user_id=str(current_user.public_id)
             )
 
         return JSONResponse(content={
@@ -188,14 +216,19 @@ async def transcribe_audio(
 
 # ── Endpoints para gestionar transcripciones guardadas ──────────
 @router.get("/history")
-async def get_transcription_history(limit: int = 10, user_id: Optional[str] = None):
+async def get_transcription_history(
+    limit: int = 10,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Obtiene el historial de transcripciones"""
     try:
         transcriptions = load_transcriptions()
         
-        # Filtrar por user_id si se proporciona
-        if user_id:
-            transcriptions = [t for t in transcriptions if t.get('user_id') == user_id]
+        limit = max(1, min(limit, 50))
+        transcriptions = [
+            t for t in transcriptions
+            if t.get("user_id") == str(current_user.public_id)
+        ]
         
         return JSONResponse(content={
             "success": True,
@@ -210,7 +243,10 @@ async def get_transcription_history(limit: int = 10, user_id: Optional[str] = No
         )
 
 @router.delete("/history/{transcription_id}")
-async def delete_transcription(transcription_id: int):
+async def delete_transcription(
+    transcription_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Elimina una transcripción específica"""
     try:
         transcriptions = load_transcriptions()
@@ -241,12 +277,18 @@ async def delete_transcription(transcription_id: int):
         )
 
 @router.delete("/history")
-async def clear_transcription_history():
+async def clear_transcription_history(
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Elimina todo el historial de transcripciones"""
     try:
-        if os.path.exists(TRANSCRIPTIONS_FILE):
-            os.remove(TRANSCRIPTIONS_FILE)
-            print("🗑️ Historial de transcripciones eliminado")
+        transcriptions = load_transcriptions()
+        remaining = [
+            t for t in transcriptions
+            if t.get("user_id") != str(current_user.public_id)
+        ]
+        with open(TRANSCRIPTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(remaining, f, ensure_ascii=False, indent=2)
         return JSONResponse(content={
             "success": True,
             "message": "Historial eliminado completamente"
@@ -261,7 +303,9 @@ async def clear_transcription_history():
 
 # ── Endpoint de estadísticas ─────────────────────────────────────
 @router.get("/stats")
-async def get_transcription_stats():
+async def get_transcription_stats(
+    current_user: CurrentUser = Depends(require_roles("admin")),
+):
     """Obtiene estadísticas de las transcripciones"""
     try:
         transcriptions = load_transcriptions()

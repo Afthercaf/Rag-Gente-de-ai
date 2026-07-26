@@ -1,0 +1,149 @@
+{
+  "generated_at": "2026-07-24 10:48:46",
+  "user_id": 60911715,
+  "summary": {
+    "order_flows": 3,
+    "note": "Prueba /chat; la ubicación y creación en BD se realizan mediante placeOrder.",
+    "total_steps": 17,
+    "passed": 10,
+    "failed": 7
+  },
+  "results": [
+    {
+      "purchase": 1,
+      "step": "registrar pizzas",
+      "message": "2 Pizza Pepperoni",
+      "passed": true,
+      "reply": "Registré 2 pizzas:\n• 2 × Pizza Pepperoni\n\n¿Deseas agregar extras a alguna de las pizzas?\nSelecciona Sí para indicar cuáles pizzas, cuántas y qué extras; o No para continuar sin extras. ➕",
+      "reason": ""
+    },
+    {
+      "purchase": 1,
+      "step": "seleccionar sí",
+      "message": "sí",
+      "passed": true,
+      "reply": "Perfecto. Indica a cuáles pizzas deseas agregar extras, cuántas unidades y cuáles extras.\n\n• 2 × Pizza Pepperoni\n\nExtras disponibles:\n• Queso extra — $45.00 MXN\n• Orilla de queso — $50.00 MXN\n• pepperoni — $45.00 MXN\n• pimiento — $45.00 MXN\n• cebolla — $45.00 MXN\n• aceitunas y atún — $45.00 MXN\n\nEjemplo: 2 Pepperoni con queso extra y 1 Pastorera con orilla de queso.",
+      "reason": ""
+    },
+    {
+      "purchase": 1,
+      "step": "aplicar extra",
+      "message": "1 Pepperoni con queso extra",
+      "passed": true,
+      "reply": "Extras aplicados correctamente:\n• 1 × Pizza Pepperoni: Queso extra\n\n✅ ¡Perfecto! Tu pedido está listo:\n\n📝 PEDIDO:\nCantidad: 2\nProductos:\n• 1 × Pizza Pepperoni — $115.00\n  Extras por pizza: Queso extra ($45.00)\n• 1 × Pizza Pepperoni — $115.00\n  Extras: Ninguno\n\nBebidas del pedido: Ninguna\nTamaño: Grande\nTotal: $275.00 MXN\n\n¿Confirmas tu pedido? ✅",
+      "reason": ""
+    },
+    {
+      "purchase": 1,
+      "step": "confirmar",
+      "message": "confirmar",
+      "passed": true,
+      "reply": "✅ Pedido confirmado.\n\n💳 ¿Cómo deseas pagar?\n• Efectivo\n• Mercado Pago",
+      "reason": ""
+    },
+    {
+      "purchase": 1,
+      "step": "efectivo",
+      "message": "efectivo",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, necesito tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    },
+    {
+      "purchase": 1,
+      "step": "cerrar flujo de ubicación",
+      "message": "cancelar",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    },
+    {
+      "purchase": 2,
+      "step": "nuevo pedido",
+      "message": "1 Pizza Mexicana",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Debe iniciar un carrito limpio con una Mexicana."
+    },
+    {
+      "purchase": 2,
+      "step": "sin extras",
+      "message": "no",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "La segunda compra debe quedar en $180 sin heredar datos."
+    },
+    {
+      "purchase": 2,
+      "step": "confirmar",
+      "message": "confirmar",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Debe confirmar la segunda compra."
+    },
+    {
+      "purchase": 2,
+      "step": "efectivo",
+      "message": "efectivo",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    },
+    {
+      "purchase": 2,
+      "step": "cerrar flujo de ubicación",
+      "message": "cancelar",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    },
+    {
+      "purchase": 3,
+      "step": "nuevo pedido",
+      "message": "3 Pizza Pastorera",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Debe iniciar el tercer carrito limpio."
+    },
+    {
+      "purchase": 3,
+      "step": "sin extras",
+      "message": "no",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Tres Pastoreras sin extras deben sumar $660."
+    },
+    {
+      "purchase": 3,
+      "step": "agregar bebidas",
+      "message": "agrega 2 refrecos",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Debe aceptar refrecos, agregar dos bebidas y totalizar $750."
+    },
+    {
+      "purchase": 3,
+      "step": "confirmar",
+      "message": "confirmar",
+      "passed": false,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": "Debe confirmar la tercera compra."
+    },
+    {
+      "purchase": 3,
+      "step": "efectivo",
+      "message": "efectivo",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    },
+    {
+      "purchase": 3,
+      "step": "cerrar flujo final",
+      "message": "cancelar",
+      "passed": true,
+      "reply": "📍 Para completar tu pedido, comparte tu ubicación exacta.\n📍 Compartir mi ubicación",
+      "reason": ""
+    }
+  ]
+}
