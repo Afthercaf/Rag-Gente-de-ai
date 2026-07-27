@@ -16,7 +16,7 @@ dist-ssr
 .env.production
 _pycache__
 chroma
-tests
+tests*
 
 
 # Editor directories and files
@@ -29,3 +29,4 @@ tests
 *.njsproj
 *.sln
 *.sw?
+tests/

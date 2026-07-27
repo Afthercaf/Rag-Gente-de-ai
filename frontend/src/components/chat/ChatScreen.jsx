@@ -185,7 +185,7 @@
 //     try {
 //       const orderData = pendingOrderData;
 //       const pedidoText = normalizeOrderText(orderData.pedido);
-//       const result = await placeOrder(user.id, pedidoText, orderData.data, location);
+//       const result = await placeOrder(pedidoText, orderData.data, location);
 //       if (result.success) {
 //         addMsg("bot", `✅ ¡Pedido #${result.order_id} confirmado!${result.total ? `\n💰 Total: ${result.total}` : ""}\n📍 Ubicación recibida.\n🍕 Te avisaré cuando el estado cambie.`);
 //         lastReportedStatus.current = "pendiente";
@@ -951,8 +951,80 @@ export default function ChatScreen({ user, onLogout }) {
     try {
       const orderData = pendingOrderData;
       const pedidoText = normalizeOrderText(orderData.pedido);
-      
-      const result = await placeOrder(pedidoText, orderData.data, location);
+
+      const normalizedOrderData = {
+        cliente_nombre: String(
+          orderData.data?.cliente_nombre ||
+          user?.nombre ||
+          ""
+        ).trim(),
+        telefono: String(
+          orderData.data?.telefono ||
+          user?.telefono ||
+          ""
+        ).trim(),
+        gmail: String(
+          orderData.data?.gmail ||
+          user?.gmail ||
+          ""
+        )
+          .trim()
+          .toLowerCase(),
+        direccion: String(
+          orderData.data?.direccion ||
+          user?.direccion ||
+          location?.direccion_completa ||
+          ""
+        ).trim(),
+        payment_method:
+          orderData.data?.payment_method === "mercado_pago"
+            ? "mercado_pago"
+            : "efectivo",
+      };
+
+      const missingFields = [];
+
+      if (!pedidoText) {
+        missingFields.push("pedido");
+      }
+
+      if (normalizedOrderData.cliente_nombre.length < 2) {
+        missingFields.push("nombre");
+      }
+
+      if (
+        normalizedOrderData.telefono.replace(/\D/g, "").length < 8
+      ) {
+        missingFields.push("teléfono");
+      }
+
+      if (!normalizedOrderData.gmail.includes("@")) {
+        missingFields.push("correo");
+      }
+
+      if (normalizedOrderData.direccion.length < 3) {
+        missingFields.push("dirección");
+      }
+
+      if (
+        !location ||
+        !Number.isFinite(Number(location.lat)) ||
+        !Number.isFinite(Number(location.lng))
+      ) {
+        missingFields.push("ubicación");
+      }
+
+      if (missingFields.length > 0) {
+        throw new Error(
+          `Faltan datos válidos: ${missingFields.join(", ")}`
+        );
+      }
+
+      const result = await placeOrder(
+        pedidoText,
+        normalizedOrderData,
+        location
+      );
 
       if (result.success) {
         // Mensaje de confirmación base
