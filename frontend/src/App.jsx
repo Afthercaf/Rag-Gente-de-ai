@@ -47,11 +47,6 @@ export default function App() {
 
         setScreen("chat");
       } catch (error) {
-        console.warn(
-          "La sesión no es válida o expiró:",
-          error
-        );
-
         if (!active) return;
 
         clearSession();

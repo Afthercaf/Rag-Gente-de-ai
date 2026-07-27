@@ -80,8 +80,7 @@ export const useVoiceRecognition = ({
         } else {
           onError?.(data.error || "No se detectó voz, intenta de nuevo");
         }
-      } catch (err) {
-        console.error("❌ Error transcripción:", err);
+      } catch {
         onError?.("Error al procesar el audio, intenta de nuevo");
       } finally {
         isTranscribingRef.current = false;
@@ -122,12 +121,10 @@ export const useVoiceRecognition = ({
           const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
           if (avg > 2) {
             hasAudioRef.current = true;
-            console.log("✅ Señal de micrófono detectada, volumen:", avg.toFixed(2));
           }
         }, 200);
-      } catch (e) {
+      } catch {
         // Si AudioContext falla, igual intentamos grabar
-        console.warn("⚠️ No se pudo iniciar analizador de audio:", e);
         hasAudioRef.current = true; // asumir que hay audio
       }
 
@@ -155,7 +152,6 @@ export const useVoiceRecognition = ({
 
         // Verificar que hubo señal real
         if (!hasAudioRef.current) {
-          console.warn("⚠️ No se detectó señal de audio — micrófono en silencio");
           onError?.("No se detectó audio. Verifica que el micrófono correcto esté seleccionado en Brave.");
           return;
         }
@@ -163,7 +159,6 @@ export const useVoiceRecognition = ({
         const blob = new Blob(chunksRef.current, {
           type: mimeType || "audio/webm",
         });
-        console.log("📦 Blob size:", blob.size, "bytes");
         chunksRef.current = [];
 
         await transcribeAudio(blob);
@@ -172,10 +167,8 @@ export const useVoiceRecognition = ({
       mediaRecorder.start();
       setIsListening(true);
       setTranscript("");
-      console.log("🎤 Grabando audio...");
 
     } catch (err) {
-      console.error("❌ Error al acceder al micrófono:", err);
       cleanupAudioAnalyser();
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
         onError?.("Permiso denegado para usar el micrófono");
@@ -203,7 +196,6 @@ export const useVoiceRecognition = ({
     }
 
     setIsListening(false);
-    console.log("⏹️ Grabación detenida, transcribiendo...");
   }, [isListening]);
 
   // ── Toggle ────────────────────────────────────────────────────

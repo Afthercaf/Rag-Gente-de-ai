@@ -32,6 +32,10 @@ export default function RegisterScreen({
   const [loading, setLoading] = useState(false);
 
   const set = (key) => (value) => {
+    if (key === "telefono") {
+      const digits = value.replace(/\D/g, "").slice(0, 10);
+      value = digits;
+    }
     setForm((current) => ({
       ...current,
       [key]: value,
@@ -58,6 +62,11 @@ export default function RegisterScreen({
       !password
     ) {
       setError("Completa todos los campos.");
+      return;
+    }
+
+    if (!/^\d{10}$/.test(telefono.replace(/\D/g, ""))) {
+      setError("El teléfono debe contener exactamente 10 dígitos.");
       return;
     }
 

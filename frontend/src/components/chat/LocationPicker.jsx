@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
+import { apiBlobRequest, apiRequest } from "../../api/client";
+
 import "../../styles/theme.css";
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
-).replace(/\/$/, "");
 
 export default function LocationPicker({
   onLocationSelect,
@@ -14,6 +13,7 @@ export default function LocationPicker({
   const [error, setError] = useState(null);
   const [address, setAddress] = useState("");
   const [coordinates, setCoordinates] = useState(null);
+  const [mapUrl, setMapUrl] = useState(null);
 
   const hasSelected = useRef(false);
   const isMounted = useRef(true);
@@ -24,6 +24,10 @@ export default function LocationPicker({
 
     return () => {
       isMounted.current = false;
+      setMapUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
     };
   }, []);
 
@@ -34,25 +38,9 @@ export default function LocationPicker({
         lng: String(lng),
       });
 
-      const response = await fetch(
-        `${API_BASE_URL}/maps/reverse?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-        },
+      const data = await apiRequest(
+        `/maps/reverse?${params.toString()}`,
       );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            data?.message ||
-            "No se pudo obtener la dirección",
-        );
-      }
 
       if (
         data?.display_name &&
@@ -61,17 +49,11 @@ export default function LocationPicker({
       ) {
         setAddress(data.display_name);
       }
-    } catch (requestError) {
-      console.error(
-        "Error en geocodificación inversa:",
-        requestError,
-      );
-
+    } catch {
       if (isMounted.current) {
         setError(
           "No se pudo obtener la dirección exacta, pero puedes continuar.",
         );
-
         setAddress(`${lat}, ${lng}`);
       }
     }
@@ -175,25 +157,9 @@ export default function LocationPicker({
         q: normalizedSearch,
       });
 
-      const response = await fetch(
-        `${API_BASE_URL}/maps/search?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-        },
+      const data = await apiRequest(
+        `/maps/search?${params.toString()}`,
       );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            data?.message ||
-            "No se pudo buscar la dirección",
-        );
-      }
 
       if (!isMounted.current) {
         return;
@@ -208,7 +174,6 @@ export default function LocationPicker({
           lat: data.lat,
           lng: data.lng,
         });
-
         setAddress(data.display_name);
       } else {
         setError(
@@ -216,13 +181,9 @@ export default function LocationPicker({
         );
       }
     } catch (requestError) {
-      console.error(
-        "Error buscando dirección:",
-        requestError,
-      );
-
       if (isMounted.current) {
         setError(
+          requestError?.message ||
           "Error al buscar la dirección. Intenta nuevamente.",
         );
       }
@@ -269,15 +230,63 @@ export default function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const mapUrl = coordinates
-    ? `${API_BASE_URL}/maps/static?${new URLSearchParams({
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStaticMap() {
+      if (!coordinates) {
+        setMapUrl((current) => {
+          if (current) {
+            URL.revokeObjectURL(current);
+          }
+          return null;
+        });
+        return;
+      }
+
+      const params = new URLSearchParams({
         lat: String(coordinates.lat),
         lng: String(coordinates.lng),
         zoom: "16",
         width: "400",
         height: "200",
-      }).toString()}`
-    : null;
+      });
+
+      try {
+        const blob = await apiBlobRequest(
+          `/maps/static?${params.toString()}`,
+        );
+
+        if (cancelled || !isMounted.current) {
+          return;
+        }
+
+        const nextUrl = URL.createObjectURL(blob);
+
+        setMapUrl((current) => {
+          if (current) {
+            URL.revokeObjectURL(current);
+          }
+          return nextUrl;
+        });
+      } catch {
+        if (!cancelled && isMounted.current) {
+          setMapUrl((current) => {
+            if (current) {
+              URL.revokeObjectURL(current);
+            }
+            return null;
+          });
+        }
+      }
+    }
+
+    loadStaticMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [coordinates]);
 
   return (
     <div

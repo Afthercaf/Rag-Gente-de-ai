@@ -426,9 +426,6 @@ const AVAILABLE_EXTRAS = [
 ];
 
 export default function ChatScreen({ user, onLogout }) {
-  // LOG INICIAL: Para ver qué usuario está cargando la pantalla
-  console.log("👤 [ChatScreen] Render - User prop:", user);
-
   const [messages, setMessages] = useState([
     {
       id: nextId(),
@@ -464,13 +461,11 @@ export default function ChatScreen({ user, onLogout }) {
     stopListening,
   } = useVoiceRecognition({
     onResult: (text) => {
-      console.log("🎤 [Voice Hook] onResult:", text);
       if (text.trim()) {
         setInput(text);
         if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
         sendTimeoutRef.current = setTimeout(() => {
           if (text.trim() && !loading && !isSubmittingOrder && !orderForm) {
-            console.log("🎤 [Voice Hook] Auto-enviando mensaje por voz...");
             sendMessage(text.trim());
           }
           sendTimeoutRef.current = null;
@@ -478,7 +473,6 @@ export default function ChatScreen({ user, onLogout }) {
       }
     },
     onError: (errorMsg) => {
-      console.error("🎤 [Voice Hook] Error:", errorMsg);
       setVoiceError(errorMsg);
       addMsg("bot", `🎤 ${errorMsg}`);
       setTimeout(() => {
@@ -519,7 +513,6 @@ export default function ChatScreen({ user, onLogout }) {
   }, [onLogout]);
 
   const addMsg = (role, text, requiresAction = false, extra = {}) => {
-    console.log(`💬 [addMsg] Agregando mensaje - Rol: ${role} | Texto:`, text);
     const newMsg = { id: nextId(), role, text, ...extra };
     if (requiresAction && role === "bot") newMsg.requiresLocation = true;
     setMessages((m) => [...m, newMsg]);
@@ -530,7 +523,6 @@ export default function ChatScreen({ user, onLogout }) {
 
   useEffect(() => {
     if (!activeOrderId) return;
-    console.log(`🔔 [useOrderStatus] ID: ${activeOrderId} | Status actual: ${orderStatus}`);
     if (orderStatus === lastReportedStatus.current) return;
     lastReportedStatus.current = orderStatus;
     if (orderStatus !== "pendiente") addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
@@ -749,7 +741,6 @@ export default function ChatScreen({ user, onLogout }) {
     if (!text.trim()) return;
 
     setInputHint("");
-    console.log("📤 [sendMessage] Iniciando envío de texto:", text);
 
     if (isListening) stopListening();
 
@@ -758,12 +749,7 @@ export default function ChatScreen({ user, onLogout }) {
     setLoading(true);
 
     try {
-      console.log(
-        `🌐 [API sendChat] Solicitando mensaje autenticado: "${text}"`
-      );
-
       const data = await sendChat(text);
-      console.log("📥 [API sendChat] Respuesta recibida:", data);
 
       const locationPrompt = isLocationPrompt(data.reply, data);
       const extrasDecisionPrompt = isExtrasDecisionPrompt(data.reply);
@@ -821,10 +807,6 @@ export default function ChatScreen({ user, onLogout }) {
         };
 
         setPendingOrderData(nextPendingOrder);
-        console.log(
-          "💾 [sendMessage] Pedido guardado a la espera de confirmación:",
-          nextPendingOrder
-        );
       }
 
       /*
@@ -837,9 +819,6 @@ export default function ChatScreen({ user, onLogout }) {
 
         setPendingOrderData((current) => {
           if (!current) {
-            console.error(
-              "❌ [sendMessage] Se solicitó ubicación sin pendingOrderData."
-            );
             return current;
           }
 
@@ -856,17 +835,8 @@ export default function ChatScreen({ user, onLogout }) {
             },
           };
 
-          console.log(
-            "📍 [sendMessage] Pedido listo para ubicación:",
-            updated
-          );
-
           return updated;
         });
-
-        console.log(
-          "📍 [sendMessage] Solicitud de ubicación detectada. Botón habilitado."
-        );
       }
 
       /*
@@ -903,11 +873,6 @@ export default function ChatScreen({ user, onLogout }) {
 
         setPendingOrderData(formSetup);
         setOrderForm(formSetup);
-
-        console.log(
-          "💳 [sendMessage] Abriendo selector único de método de pago:",
-          formSetup
-        );
       } else if (orderDraft) {
         /*
          * El resumen todavía espera confirmación.
@@ -916,8 +881,15 @@ export default function ChatScreen({ user, onLogout }) {
         setOrderForm(null);
       }
     } catch (err) {
-      console.error("❌ [sendMessage] Error en la petición:", err);
-      addMsg("bot", `❌ ${err.message}`);
+      let message = "Error al procesar el pedido";
+
+      if (err?.message) {
+        message = err.message;
+      } else if (typeof err === "string") {
+        message = err;
+      }
+
+      addMsg("bot", `❌ ${message}`);
     } finally {
       setLoading(false);
     }
@@ -925,13 +897,11 @@ export default function ChatScreen({ user, onLogout }) {
 
 
   const normalizeOrderText = (pedido) => {
-    const original = pedido;
     let result = "";
     if (typeof pedido === "string") result = pedido.trim();
     else if (pedido && typeof pedido.raw === "string") result = pedido.raw.trim();
     else if (pedido) result = JSON.stringify(pedido).trim();
     
-    console.log("🔍 [normalizeOrderText] De:", original, "-> Normalizado a:", result);
     return result;
   };
 
@@ -940,13 +910,11 @@ export default function ChatScreen({ user, onLogout }) {
     const step = ORDER_STEPS[orderForm.step];
     const newData = { ...orderForm.data, [step.key]: value };
     
-    console.log(`📥 [submitOrderStep] Paso ${orderForm.step} (${step.key}) recibido valor:`, value);
     addMsg("user", value);
 
     if (orderForm.step < ORDER_STEPS.length - 1) {
       const nextFormState = { ...orderForm, step: orderForm.step + 1, data: newData };
       setOrderForm(nextFormState);
-      console.log("➡️ [submitOrderStep] Avanzando al siguiente paso del formulario:", nextFormState);
     } else {
       const finalPendingData = {
         pedido: normalizeOrderText(orderForm.pedido),
@@ -962,11 +930,6 @@ export default function ChatScreen({ user, onLogout }) {
       setPendingOrderData(finalPendingData);
       setOrderForm(null);
 
-      console.log(
-        "🏁 [submitOrderStep] Formulario finalizado. pendingOrderData listo:",
-        finalPendingData
-      );
-
       addMsg(
         "bot",
         "📍 Para completar tu pedido, necesito tu ubicación exacta.",
@@ -976,10 +939,8 @@ export default function ChatScreen({ user, onLogout }) {
   };
 
   const handleLocationConfirm = async (location) => {
-    console.log("📍 [handleLocationConfirm] Ubicación seleccionada del mapa:", location);
     if (isSubmittingOrder) return;
     if (!pendingOrderData) {
-      console.error("❌ [handleLocationConfirm] Intento de confirmar ubicación sin pendingOrderData");
       addMsg("bot", "❌ Error: No se encontraron datos del pedido. Por favor, intenta nuevamente.");
       setShowLocationPicker(false);
       return;
@@ -991,14 +952,7 @@ export default function ChatScreen({ user, onLogout }) {
       const orderData = pendingOrderData;
       const pedidoText = normalizeOrderText(orderData.pedido);
       
-      console.log("🌐 [API placeOrder] Enviando payload final:", {
-        pedidoText,
-        userData: orderData.data,
-        location
-      });
-
       const result = await placeOrder(pedidoText, orderData.data, location);
-      console.log("📥 [API placeOrder] Respuesta del servidor:", result);
 
       if (result.success) {
         // Mensaje de confirmación base
@@ -1019,11 +973,8 @@ export default function ChatScreen({ user, onLogout }) {
         const payment = result.payment;
 
         if (payment && payment.method === "mercadopago") {
-          console.log("💳 [handleLocationConfirm] Procesando pago Mercado Pago:", payment);
-
           // 1. QR Code (para pagos presenciales)
           if (payment.qr_code_base64) {
-            console.log("📱 [handleLocationConfirm] Mostrando QR Code");
             addMsg(
               "bot",
               `💳 Escanea este código QR con tu app de Mercado Pago para pagar.${
@@ -1036,8 +987,6 @@ export default function ChatScreen({ user, onLogout }) {
 
           // 2. Link de pago (para pagos online) - PRIORIDAD ALTA
           else if (payment.url) {
-            console.log("🔗 [handleLocationConfirm] Mostrando link de pago:", payment.url);
-            
             // Mostrar mensaje con el link
             const paymentMsg = `💳 Tu pedido está listo para pagar.
 
@@ -1069,7 +1018,6 @@ ${
 
           // 3. Error en el pago
           else if (payment.success === false) {
-            console.warn("⚠️ [handleLocationConfirm] Error en pago:", payment.error);
             addMsg(
               "bot",
               `⚠️ Tu pedido fue confirmado, pero no pude generar el pago automáticamente (${payment.error || "error desconocido"}). Por favor avísanos para coordinar el cobro.`
@@ -1078,7 +1026,6 @@ ${
 
           // 4. Fallback: Pago en proceso
           else {
-            console.log("ℹ️ [handleLocationConfirm] Pago en proceso sin detalles adicionales");
             addMsg(
               "bot",
               "💳 Pago con Mercado Pago en proceso. Te avisaremos cuando esté listo."
@@ -1089,8 +1036,59 @@ ${
         addMsg("bot", `❌ Error al crear el pedido: ${result.message || "Intenta nuevamente"}`);
       }
     } catch (err) {
-      console.error("❌ [handleLocationConfirm] Error fatal al procesar pedido:", err);
-      addMsg("bot", `❌ Error al procesar el pedido: ${err.message}`);
+      let message = "Error al procesar el pedido";
+
+      if (err?.message) {
+        if (typeof err.message === "string") {
+          message = err.message;
+        } else if (Array.isArray(err.message)) {
+          const parts = err.message
+            .map((item) => {
+              if (typeof item === "string") return item;
+              if (typeof item === "object" && item !== null) {
+                if (item.msg) return String(item.msg);
+                if (item.message) return String(item.message);
+              }
+              return null;
+            })
+            .filter(Boolean);
+
+          if (parts.length > 0) {
+            message = parts.join(", ");
+          } else {
+            message = "Error de validación. Por favor, revisa los datos del pedido.";
+          }
+        } else if (typeof err.message === "object" && err.message !== null) {
+          if (err.message.msg) {
+            message = String(err.message.msg);
+          } else if (err.message.message) {
+            message = String(err.message.message);
+          } else {
+            message = "Error de validación. Por favor, revisa los datos del pedido.";
+          }
+        }
+      } else if (typeof err === "string") {
+        message = err;
+      } else if (Array.isArray(err)) {
+        const parts = err
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (typeof item === "object" && item !== null) {
+              if (item.msg) return String(item.msg);
+              if (item.message) return String(item.message);
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        if (parts.length > 0) {
+          message = parts.join(", ");
+        } else {
+          message = "Error de validación. Por favor, revisa los datos del pedido.";
+        }
+      }
+
+      addMsg("bot", `❌ ${message}`);
     } finally {
       setLoading(false);
       setIsSubmittingOrder(false);
@@ -1098,14 +1096,12 @@ ${
   };
 
   const handleLogout = async () => { 
-    console.log("🚪 [handleLogout] Cerrando sesión...");
     await logout(); 
     clearSession(); 
     onLogout(); 
   };
 
   const handleVoiceClick = () => {
-    console.log("🎙️ [handleVoiceClick] Cambiando estado de escucha. Actual:", isListening);
     if (isListening) {
       stopListening();
     } else {
@@ -1190,7 +1186,6 @@ ${
                     <button
                       className="p220-share-loc-btn"
                       onClick={() => {
-                        console.log("🗺️ [UI] Botón compartir ubicación clickeado. Abriendo LocationPicker.");
                         setShowLocationPicker(true);
                       }}
                       disabled={isSubmittingOrder}
@@ -1683,9 +1678,8 @@ ${
           )}
           <button
             className="p220-cancel-btn"
-            onClick={() => {
-              console.log("🎙️ [UI] Cancelando captura de voz.");
-              stopListening();
+          onClick={() => {
+            stopListening();
               setInput("");
               if (sendTimeoutRef.current) {
                 clearTimeout(sendTimeoutRef.current);
@@ -1710,7 +1704,6 @@ ${
         <LocationPicker
           onLocationSelect={handleLocationConfirm}
           onClose={() => {
-            console.log("🗺️ [UI] Cerrando LocationPicker.");
             setShowLocationPicker(false);
           }}
         />

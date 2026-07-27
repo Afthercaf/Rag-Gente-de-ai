@@ -41,12 +41,6 @@ export function useOrderStatus(orderId) {
 
         const data = await res.json();
 
-        console.log(
-          "[ORDER STATUS]",
-          orderId,
-          data
-        );
-
         const newStatus =
           data.status ||
           data.estado ||
@@ -59,10 +53,7 @@ export function useOrderStatus(orderId) {
           intervalRef.current = null;
         }
       } catch (err) {
-        console.error(
-          "[useOrderStatus]",
-          err
-        );
+        // Silencioso en producción
       }
     };
 
