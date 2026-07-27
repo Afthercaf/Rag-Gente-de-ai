@@ -443,6 +443,7 @@ export default function ChatScreen({ user, onLogout }) {
   const [voiceError, setVoiceError] = useState(null);
   const [extrasPrompt, setExtrasPrompt] = useState(null);
   const [extrasInput, setExtrasInput] = useState("");
+  const [selectedExtras, setSelectedExtras] = useState([]);
   const [beverageQuantity, setBeverageQuantity] = useState(1);
   const [inputHint, setInputHint] = useState("");
   const [handledActionMessages, setHandledActionMessages] = useState([]);
@@ -511,6 +512,11 @@ export default function ChatScreen({ user, onLogout }) {
       );
     };
   }, [onLogout]);
+
+  // Reinicia la selección de extras cada vez que aparece un nuevo prompt.
+  useEffect(() => {
+    setSelectedExtras([]);
+  }, [extrasPrompt?.messageId]);
 
   const addMsg = (role, text, requiresAction = false, extra = {}) => {
     const newMsg = { id: nextId(), role, text, ...extra };
@@ -650,6 +656,7 @@ export default function ChatScreen({ user, onLogout }) {
     markActionHandled(msg.id);
     setExtrasPrompt(null);
     setExtrasInput("");
+    setSelectedExtras([]);
     setInputHint("");
 
     // El backend debe recibir la decisión para pasar a
@@ -687,20 +694,32 @@ export default function ChatScreen({ user, onLogout }) {
 
     setExtrasPrompt(null);
     setExtrasInput("");
+    setSelectedExtras([]);
     setInputHint("");
     sendMessage(`1 ${product.name} con todo`);
   };
 
-  const applySinglePizzaExtra = (extraName) => {
-    if (!extrasPrompt || loading) return;
+  const toggleExtra = (extraName) => {
+    setSelectedExtras((current) =>
+      current.includes(extraName)
+        ? current.filter((e) => e !== extraName)
+        : [...current, extraName]
+    );
+  };
+
+  const confirmSinglePizzaExtras = () => {
+    if (!extrasPrompt || loading || selectedExtras.length === 0) return;
 
     const product = extrasPrompt.products?.[0];
     if (!product) return;
 
-    const command = `1 ${product.name} con ${extraName.toLowerCase()}`;
+    const command = `1 ${product.name} con ${selectedExtras
+      .join(" y ")
+      .toLowerCase()}`;
 
     setExtrasPrompt(null);
     setExtrasInput("");
+    setSelectedExtras([]);
     setInputHint("");
     sendMessage(command);
   };
@@ -1320,317 +1339,88 @@ ${
             ))}
 
             {extrasPrompt && (
-              <div
-                className="p220-order-card"
-                style={{
-                  padding: 14,
-                  borderRadius: 16,
-                  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.08)",
-                }}
-              >
-                {isSinglePizzaExtrasPrompt(extrasPrompt) ? (
-                  <>
-                    <div
-                      className="p220-order-label"
-                      style={{ marginBottom: 4 }}
-                    >
-                      Elige un extra para Pizza{" "}
-                      {extrasPrompt.products[0].name}
-                    </div>
+              isSinglePizzaExtrasPrompt(extrasPrompt) ? (
+                <div className="p220-msg-row">
+                  <span className="p220-avatar">🍕</span>
+                  <div
+                    className="p220-bubble p220-bubble-bot"
+                    style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 260 }}
+                  >
+                    <div>¿Le agregas algún extra a tu {extrasPrompt.products[0].name}?</div>
 
-                    <div
-                      style={{
-                        marginBottom: 12,
-                        fontSize: 13,
-                        opacity: 0.72,
-                      }}
-                    >
-                      El extra seleccionado se aplicará a esta única pizza.
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(145px, 1fr))",
-                        gap: 8,
-                      }}
-                    >
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {AVAILABLE_EXTRAS.map((extra) => (
                         <button
                           key={extra.name}
                           type="button"
-                          className="p220-opt-btn"
+                          className={`p220-opt-btn${selectedExtras.includes(extra.name) ? " is-active" : ""}`}
                           disabled={loading}
-                          onClick={() =>
-                            applySinglePizzaExtra(extra.name)
-                          }
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-start",
-                            minHeight: 58,
-                            padding: "10px 12px",
-                            textAlign: "left",
-                          }}
+                          onClick={() => toggleExtra(extra.name)}
+                          style={{ padding: "6px 10px", fontSize: 13 }}
                         >
-                          <span style={{ fontWeight: 700 }}>
-                            {extra.name}
-                          </span>
-                          <span
-                            style={{
-                              marginTop: 2,
-                              fontSize: 12,
-                              opacity: 0.72,
-                            }}
-                          >
-                            {extra.price}
-                          </span>
+                          {selectedExtras.includes(extra.name) ? "✓ " : ""}
+                          {extra.name}
                         </button>
                       ))}
                     </div>
 
-                    <button
-                      type="button"
-                      className="p220-opt-btn is-active"
-                      disabled={loading}
-                      onClick={applySinglePizzaAllExtras}
-                      style={{
-                        width: "100%",
-                        marginTop: 10,
-                        minHeight: 48,
-                        fontWeight: 700,
-                      }}
-                    >
-                      Con todo
-                      <span
-                        style={{
-                          display: "block",
-                          marginTop: 2,
-                          fontSize: 12,
-                          fontWeight: 400,
-                          opacity: 0.78,
-                        }}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="p220-opt-btn"
+                        disabled={loading}
+                        onClick={applySinglePizzaAllExtras}
+                        style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
                       >
-                        Agrega todos los extras a esta pizza
-                      </span>
-                    </button>
+                        Con todo
+                      </button>
 
-                    <div
-                      style={{
-                        marginTop: 12,
-                        padding: 10,
-                        borderRadius: 10,
-                        background: "rgba(0, 0, 0, 0.035)",
-                      }}
-                    >
-                      <div
+                      <button
+                        type="button"
+                        className="p220-opt-btn is-active"
+                        disabled={loading || selectedExtras.length === 0}
+                        onClick={confirmSinglePizzaExtras}
                         style={{
-                          marginBottom: 8,
+                          flex: 1,
+                          padding: "6px 10px",
                           fontSize: 13,
-                          fontWeight: 700,
+                          opacity: selectedExtras.length === 0 ? 0.5 : 1,
                         }}
                       >
-                        Agregar refrescos al pedido
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <input
-                          type="number"
-                          min="1"
-                          max="20"
-                          inputMode="numeric"
-                          value={beverageQuantity}
-                          onChange={(event) =>
-                            setBeverageQuantity(event.target.value)
-                          }
-                          className="p220-order-input"
-                          style={{ width: 76, minWidth: 76 }}
-                          aria-label="Cantidad de refrescos"
-                        />
-
-                        <button
-                          type="button"
-                          className="p220-opt-btn"
-                          disabled={loading}
-                          onClick={addBeveragesDuringExtras}
-                          style={{ flex: 1 }}
-                        >
-                          Coca-Cola 1.35L
-                          <span
-                            style={{
-                              display: "block",
-                              fontSize: 12,
-                              opacity: 0.72,
-                            }}
-                          >
-                            $45.00 MXN c/u
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      className="p220-opt-btn"
-                      disabled={loading}
-                      style={{
-                        width: "100%",
-                        marginTop: 10,
-                      }}
-                      onClick={() =>
-                        handleExtrasDecision("no", {
-                          id: extrasPrompt.messageId,
-                        })
-                      }
-                    >
-                      Continuar sin extras
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div
-                      className="p220-order-label"
-                      style={{ marginBottom: 8 }}
-                    >
-                      Configura los extras
-                    </div>
-
-                    {extrasPrompt.products.length > 0 && (
-                      <div
-                        style={{
-                          marginBottom: 10,
-                          padding: 10,
-                          borderRadius: 10,
-                          background: "rgba(0, 0, 0, 0.035)",
-                          fontSize: 13,
-                        }}
-                      >
-                        {extrasPrompt.products.map((product) => (
-                          <div key={product.name}>
-                            • {product.quantity} × Pizza {product.name}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div style={{ marginBottom: 10, fontSize: 13 }}>
-                      Escribe la pizza, la cantidad y los extras.
+                        Agregar seleccionados
+                      </button>
                     </div>
 
                     <div
                       style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(145px, 1fr))",
-                        gap: 7,
-                        marginBottom: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingTop: 8,
+                        borderTop: "1px solid rgba(0,0,0,0.08)",
                       }}
                     >
-                      {AVAILABLE_EXTRAS.map((extra) => (
-                        <div
-                          key={extra.name}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            padding: "8px 10px",
-                            borderRadius: 9,
-                            background: "rgba(0, 0, 0, 0.035)",
-                            fontSize: 12,
-                          }}
-                        >
-                          <span>{extra.name}</span>
-                          <strong style={{ whiteSpace: "nowrap" }}>
-                            {extra.price}
-                          </strong>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div
-                      style={{
-                        marginBottom: 12,
-                        padding: 10,
-                        borderRadius: 10,
-                        background: "rgba(0, 0, 0, 0.035)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          marginBottom: 8,
-                          fontSize: 13,
-                          fontWeight: 700,
-                        }}
-                      >
-                        Agregar refrescos al pedido
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <input
-                          type="number"
-                          min="1"
-                          max="20"
-                          inputMode="numeric"
-                          value={beverageQuantity}
-                          onChange={(event) =>
-                            setBeverageQuantity(event.target.value)
-                          }
-                          className="p220-order-input"
-                          style={{ width: 76, minWidth: 76 }}
-                          aria-label="Cantidad de refrescos"
-                        />
-
-                        <button
-                          type="button"
-                          className="p220-opt-btn"
-                          disabled={loading}
-                          onClick={addBeveragesDuringExtras}
-                          style={{ flex: 1 }}
-                        >
-                          Agregar Coca-Cola — $45.00 c/u
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p220-order-input-row">
                       <input
-                        autoFocus
-                        type="text"
-                        value={extrasInput}
-                        onChange={(event) =>
-                          setExtrasInput(event.target.value)
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            submitExtrasDescription();
-                          }
-                        }}
+                        type="number"
+                        min="1"
+                        max="20"
+                        inputMode="numeric"
+                        value={beverageQuantity}
+                        onChange={(event) => setBeverageQuantity(event.target.value)}
                         className="p220-order-input"
-                        placeholder="Ej. 2 Pepperoni con queso extra"
+                        style={{ width: 60, minWidth: 60, padding: "6px 8px", fontSize: 13 }}
+                        aria-label="Cantidad de refrescos"
+                        disabled={loading}
                       />
 
                       <button
                         type="button"
-                        onClick={submitExtrasDescription}
-                        disabled={!extrasInput.trim() || loading}
-                        className="p220-order-submit"
-                        aria-label="Enviar configuración de extras"
+                        className="p220-opt-btn"
+                        disabled={loading}
+                        onClick={addBeveragesDuringExtras}
+                        style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
                       >
-                        →
+                        🥤 Agregar Coca-Cola — $45.00 c/u
                       </button>
                     </div>
 
@@ -1638,21 +1428,181 @@ ${
                       type="button"
                       className="p220-opt-btn"
                       disabled={loading}
-                      style={{
-                        width: "100%",
-                        marginTop: 10,
-                      }}
                       onClick={() =>
-                        handleExtrasDecision("no", {
-                          id: extrasPrompt.messageId,
-                        })
+                        handleExtrasDecision("no", { id: extrasPrompt.messageId })
                       }
+                      style={{ padding: "6px 10px", fontSize: 13 }}
                     >
-                      Continuar sin extras
+                      Sin extras
                     </button>
-                  </>
-                )}
-              </div>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="p220-order-card"
+                  style={{
+                    padding: 14,
+                    borderRadius: 16,
+                    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.08)",
+                  }}
+                >
+                  <div
+                    className="p220-order-label"
+                    style={{ marginBottom: 8 }}
+                  >
+                    Configura los extras
+                  </div>
+
+                  {extrasPrompt.products.length > 0 && (
+                    <div
+                      style={{
+                        marginBottom: 10,
+                        padding: 10,
+                        borderRadius: 10,
+                        background: "rgba(0, 0, 0, 0.035)",
+                        fontSize: 13,
+                      }}
+                    >
+                      {extrasPrompt.products.map((product) => (
+                        <div key={product.name}>
+                          • {product.quantity} × Pizza {product.name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ marginBottom: 10, fontSize: 13 }}>
+                    Escribe la pizza, la cantidad y los extras.
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(145px, 1fr))",
+                      gap: 7,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {AVAILABLE_EXTRAS.map((extra) => (
+                      <div
+                        key={extra.name}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: "8px 10px",
+                          borderRadius: 9,
+                          background: "rgba(0, 0, 0, 0.035)",
+                          fontSize: 12,
+                        }}
+                      >
+                        <span>{extra.name}</span>
+                        <strong style={{ whiteSpace: "nowrap" }}>
+                          {extra.price}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: 10,
+                      borderRadius: 10,
+                      background: "rgba(0, 0, 0, 0.035)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontSize: 13,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Agregar refrescos al pedido
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        inputMode="numeric"
+                        value={beverageQuantity}
+                        onChange={(event) =>
+                          setBeverageQuantity(event.target.value)
+                        }
+                        className="p220-order-input"
+                        style={{ width: 76, minWidth: 76 }}
+                        aria-label="Cantidad de refrescos"
+                      />
+
+                      <button
+                        type="button"
+                        className="p220-opt-btn"
+                        disabled={loading}
+                        onClick={addBeveragesDuringExtras}
+                        style={{ flex: 1 }}
+                      >
+                        Agregar Coca-Cola — $45.00 c/u
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p220-order-input-row">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={extrasInput}
+                      onChange={(event) =>
+                        setExtrasInput(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          submitExtrasDescription();
+                        }
+                      }}
+                      className="p220-order-input"
+                      placeholder="Ej. 2 Pepperoni con queso extra"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={submitExtrasDescription}
+                      disabled={!extrasInput.trim() || loading}
+                      className="p220-order-submit"
+                      aria-label="Enviar configuración de extras"
+                    >
+                      →
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="p220-opt-btn"
+                    disabled={loading}
+                    style={{
+                      width: "100%",
+                      marginTop: 10,
+                    }}
+                    onClick={() =>
+                      handleExtrasDecision("no", {
+                        id: extrasPrompt.messageId,
+                      })
+                    }
+                  >
+                    Continuar sin extras
+                  </button>
+                </div>
+              )
             )}
 
             {orderForm && ORDER_STEPS[orderForm.step] && (
