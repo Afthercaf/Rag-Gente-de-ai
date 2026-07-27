@@ -1,18 +1,21 @@
 /**
  * API Client — Pizzería 220 AI
  *
- * Cliente HTTP con:
- * - Bearer token en endpoints protegidos
- * - Cookies HttpOnly habilitadas
- * - Refresh automático
- * - Cola de solicitudes durante refresh
- * - Manejo de errores normalizado
- * - Sin redirección física a /login
+ * Características:
+ * - Axios centralizado;
+ * - access token en Authorization Bearer;
+ * - token guardado en sessionStorage;
+ * - cookies HttpOnly habilitadas;
+ * - renovación automática de sesión;
+ * - cola de solicitudes durante refresh;
+ * - manejo consistente de errores;
+ * - sin navegación física a /login.
  */
 
 import axios from "axios";
 
 import {
+  clearSession,
   getAccessToken,
   getStoredUser,
   saveSession,
@@ -28,28 +31,41 @@ const API_BASE_URL =
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+
   timeout: 30000,
+
   withCredentials: true,
 
   headers: {
-    Accept: "application/json",
-    "Content-Type": "application/json",
+    Accept:
+      "application/json",
+
+    "Content-Type":
+      "application/json",
   },
 });
 
 // ============================================================================
-// ESTADO DE REFRESH
+// ESTADO DEL REFRESH
 // ============================================================================
 
 let isRefreshing = false;
+
 let failedQueue = [];
 
+/**
+ * Resuelve o rechaza las solicitudes que quedaron esperando
+ * mientras se renovaba el token.
+ */
 function processQueue(
   error,
   token = null,
 ) {
   failedQueue.forEach(
-    ({ resolve, reject }) => {
+    ({
+      resolve,
+      reject,
+    }) => {
       if (error) {
         reject(error);
       } else {
@@ -61,6 +77,9 @@ function processQueue(
   failedQueue = [];
 }
 
+/**
+ * Informa a React que la sesión dejó de ser válida.
+ */
 function notifyUnauthorized() {
   window.dispatchEvent(
     new CustomEvent(
@@ -70,56 +89,72 @@ function notifyUnauthorized() {
 }
 
 // ============================================================================
-// NORMALIZACIÓN DE ERRORES
+// ERRORES
 // ============================================================================
 
-function getErrorMessage(error) {
-  const data =
+function getErrorMessage(
+  error,
+) {
+  const responseData =
     error?.response?.data;
 
   const detail =
-    data?.detail;
+    responseData?.detail;
 
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) => {
-        if (
-          typeof item === "string"
-        ) {
-          return item;
-        }
+  if (
+    Array.isArray(detail)
+  ) {
+    const messages =
+      detail
+        .map((item) => {
+          if (
+            typeof item ===
+            "string"
+          ) {
+            return item;
+          }
 
-        if (
-          item &&
-          typeof item === "object"
-        ) {
-          const location =
-            Array.isArray(item.loc)
-              ? item.loc.join(".")
-              : "";
+          if (
+            item &&
+            typeof item ===
+            "object"
+          ) {
+            const location =
+              Array.isArray(
+                item.loc,
+              )
+                ? item.loc.join(
+                    ".",
+                  )
+                : "";
 
-          const message =
-            item.msg ||
-            item.message ||
-            "Error de validación";
+            const message =
+              item.msg ||
+              item.message ||
+              "Error de validación";
 
-          return location
-            ? `${location}: ${message}`
-            : message;
-        }
+            return location
+              ? `${location}: ${message}`
+              : message;
+          }
 
-        return null;
-      })
-      .filter(Boolean);
+          return null;
+        })
+        .filter(Boolean);
 
-    if (messages.length > 0) {
-      return messages.join("\n");
+    if (
+      messages.length > 0
+    ) {
+      return messages.join(
+        "\n",
+      );
     }
   }
 
   if (
     detail &&
-    typeof detail === "object"
+    typeof detail ===
+      "object"
   ) {
     return (
       detail.message ||
@@ -129,31 +164,39 @@ function getErrorMessage(error) {
   }
 
   if (
-    typeof detail === "string"
+    typeof detail ===
+    "string"
   ) {
     return detail;
   }
 
   if (
-    typeof data?.message === "string"
+    typeof responseData?.message ===
+    "string"
   ) {
-    return data.message;
+    return responseData.message;
   }
 
   if (
-    typeof data?.error === "string"
+    typeof responseData?.error ===
+    "string"
   ) {
-    return data.error;
+    return responseData.error;
   }
 
-  if (error?.message) {
+  if (
+    typeof error?.message ===
+    "string"
+  ) {
     return error.message;
   }
 
   return "Error de comunicación con el servidor.";
 }
 
-function normalizeError(error) {
+function normalizeError(
+  error,
+) {
   if (
     error instanceof Error &&
     error.normalized === true
@@ -161,23 +204,26 @@ function normalizeError(error) {
     return error;
   }
 
-  const normalized =
+  const normalizedError =
     new Error(
-      getErrorMessage(error),
+      getErrorMessage(
+        error,
+      ),
     );
 
-  normalized.status =
+  normalizedError.status =
     error?.response?.status;
 
-  normalized.data =
+  normalizedError.data =
     error?.response?.data;
 
-  normalized.originalError =
+  normalizedError.originalError =
     error;
 
-  normalized.normalized = true;
+  normalizedError.normalized =
+    true;
 
-  return normalized;
+  return normalizedError;
 }
 
 // ============================================================================
@@ -189,25 +235,24 @@ api.interceptors.request.use(
     const token =
       getAccessToken();
 
-    /*
-     * El backend protege /chat y otros endpoints mediante:
-     *
-     * Authorization: Bearer <access_token>
-     */
-    if (token) {
-      config.headers =
-        config.headers || {};
+    config.headers =
+      config.headers || {};
 
+    if (token) {
       config.headers.Authorization =
         `Bearer ${token}`;
+    } else {
+      delete config.headers
+        .Authorization;
     }
 
-    /*
-     * No forzar application/json cuando el body es FormData.
-     * Axios necesita generar el boundary automáticamente.
+    /**
+     * Axios debe generar automáticamente el boundary
+     * cuando se envía FormData.
      */
     if (
-      config.data instanceof FormData
+      config.data instanceof
+      FormData
     ) {
       delete config.headers[
         "Content-Type"
@@ -223,7 +268,9 @@ api.interceptors.request.use(
 
   (error) =>
     Promise.reject(
-      normalizeError(error),
+      normalizeError(
+        error,
+      ),
     ),
 );
 
@@ -232,7 +279,8 @@ api.interceptors.request.use(
 // ============================================================================
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) =>
+    response,
 
   async (error) => {
     const originalRequest =
@@ -240,7 +288,9 @@ api.interceptors.response.use(
 
     if (!originalRequest) {
       return Promise.reject(
-        normalizeError(error),
+        normalizeError(
+          error,
+        ),
       );
     }
 
@@ -249,7 +299,8 @@ api.interceptors.response.use(
 
     const requestUrl =
       String(
-        originalRequest.url || "",
+        originalRequest.url ||
+        "",
       );
 
     const isLoginRequest =
@@ -272,14 +323,14 @@ api.interceptors.response.use(
         "/auth/logout",
       );
 
-    /*
-     * No intentar refresh cuando:
-     * - el error no es 401;
+    /**
+     * No renovar cuando:
+     * - no es 401;
      * - es login;
      * - es registro;
      * - es refresh;
      * - es logout;
-     * - ya fue reintentada.
+     * - ya se reintentó.
      */
     if (
       status !== 401 ||
@@ -290,54 +341,71 @@ api.interceptors.response.use(
       originalRequest._retry
     ) {
       return Promise.reject(
-        normalizeError(error),
+        normalizeError(
+          error,
+        ),
       );
     }
 
-    /*
-     * Si otro refresh está activo,
-     * la solicitud queda en espera.
+    /**
+     * Otra solicitud ya está renovando el token.
      */
     if (isRefreshing) {
       return new Promise(
-        (resolve, reject) => {
+        (
+          resolve,
+          reject,
+        ) => {
           failedQueue.push({
             resolve,
             reject,
           });
         },
       )
-        .then((newToken) => {
-          originalRequest.headers =
-            originalRequest.headers || {};
+        .then(
+          (
+            newAccessToken,
+          ) => {
+            originalRequest.headers =
+              originalRequest.headers ||
+              {};
 
-          if (newToken) {
-            originalRequest
-              .headers
-              .Authorization =
-              `Bearer ${newToken}`;
-          }
+            if (
+              newAccessToken
+            ) {
+              originalRequest
+                .headers
+                .Authorization =
+                `Bearer ${newAccessToken}`;
+            }
 
-          return api(
-            originalRequest,
-          );
-        })
-        .catch((queueError) =>
-          Promise.reject(
-            normalizeError(
-              queueError,
+            return api(
+              originalRequest,
+            );
+          },
+        )
+        .catch(
+          (
+            queueError,
+          ) =>
+            Promise.reject(
+              normalizeError(
+                queueError,
+              ),
             ),
-          ),
         );
     }
 
-    originalRequest._retry = true;
+    originalRequest._retry =
+      true;
+
     isRefreshing = true;
 
     try {
-      /*
-       * El refresh token puede viajar en cookie HttpOnly.
-       * También conservamos el Bearer actual por compatibilidad.
+      /**
+       * El refresh token debe viajar en cookie HttpOnly.
+       * Se envía un objeto vacío para conservar Content-Type JSON
+       * y evitar errores 415 en middlewares estrictos.
        */
       const refreshResponse =
         await api.post(
@@ -353,25 +421,31 @@ api.interceptors.response.use(
           ?.data
           ?.token;
 
-      if (!newAccessToken) {
+      if (
+        !newAccessToken
+      ) {
         throw new Error(
           "El servidor no devolvió un nuevo access token.",
         );
       }
+
+      const refreshedUser =
+        refreshResponse
+          ?.data
+          ?.user;
 
       saveSession({
         accessToken:
           newAccessToken,
 
         user:
-          refreshResponse
-            ?.data
-            ?.user ||
+          refreshedUser ||
           getStoredUser(),
       });
 
       originalRequest.headers =
-        originalRequest.headers || {};
+        originalRequest.headers ||
+        {};
 
       originalRequest
         .headers
@@ -386,10 +460,14 @@ api.interceptors.response.use(
       return api(
         originalRequest,
       );
-    } catch (refreshError) {
+    } catch (
+      refreshError
+    ) {
       processQueue(
         refreshError,
       );
+
+      clearSession();
 
       notifyUnauthorized();
 
@@ -424,7 +502,9 @@ export async function login(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -440,7 +520,9 @@ export async function register(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -454,7 +536,9 @@ export async function logout() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -467,7 +551,9 @@ export async function getMe() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -487,7 +573,9 @@ export async function refreshToken() {
         ?.data
         ?.token;
 
-    if (newAccessToken) {
+    if (
+      newAccessToken
+    ) {
       saveSession({
         accessToken:
           newAccessToken,
@@ -502,7 +590,9 @@ export async function refreshToken() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -533,7 +623,9 @@ export async function sendMessage(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -553,7 +645,9 @@ export async function getChatHistory(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -566,7 +660,9 @@ export async function deleteChatHistory() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -586,7 +682,9 @@ export async function createOrder(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -601,7 +699,9 @@ export async function getOrderStatus(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -617,7 +717,9 @@ export async function cancelOrder(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -649,13 +751,16 @@ export async function transcribeAudio(
         "/voice/transcribe",
         formData,
         {
-          timeout: 60000,
+          timeout:
+            60000,
         },
       );
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -675,7 +780,9 @@ export async function getVoiceHistory(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -701,7 +808,9 @@ export async function reverseGeocode(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -714,14 +823,17 @@ export async function searchAddress(
         "/maps/search",
         {
           params: {
-            q: query,
+            q:
+              query,
           },
         },
       );
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -748,7 +860,9 @@ export async function getStaticMap(
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -765,7 +879,9 @@ export async function getCacheStats() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -779,7 +895,9 @@ export async function clearCache() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 
@@ -796,7 +914,9 @@ export async function healthCheck() {
 
     return response.data;
   } catch (error) {
-    throw normalizeError(error);
+    throw normalizeError(
+      error,
+    );
   }
 }
 

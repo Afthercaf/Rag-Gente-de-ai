@@ -1,72 +1,77 @@
-/**
- * Session Manager — Pizzería 220 AI
- * 
- * Manejo de sesión SEGURO usando cookies HttpOnly.
- * 
- * IMPORTANTE: Los tokens JWT NO se almacenan en localStorage.
- * El backend los setea como cookies HttpOnly (no accesibles desde JS).
- * 
- * Flujo:
- * 1. Login → Backend setea cookies HttpOnly (access_token + refresh_token)
- * 2. Cada request → Axios envía cookies automáticamente (withCredentials: true)
- * 3. 401 → Interceptor de client.js hace refresh automático
- * 4. Logout → Backend elimina cookies
- */
+const ACCESS_TOKEN_KEY =
+  "p220_access_token";
 
-const USER_KEY = "p220_user_metadata";
-
-// ============================================================================
-// INFORMACIÓN DEL USUARIO (NO SENSIBLE)
-// ============================================================================
+const USER_KEY =
+  "p220_user";
 
 /**
- * Guarda metadatos del usuario (NO el token).
- * Solo datos públicos como nombre, email, rol.
+ * Guarda el access token y los datos básicos del usuario.
+ *
+ * sessionStorage:
+ * - conserva la información al recargar;
+ * - mantiene la sesión mientras la pestaña siga abierta;
+ * - elimina la información al cerrar la pestaña;
+ * - no comparte automáticamente la sesión con otras pestañas.
  */
-export function saveSession({ accessToken, user }) {
-  if (!accessToken || typeof accessToken !== "string") {
-    throw new Error("El servidor no devolvió un token válido.");
+export function saveSession({
+  accessToken,
+  user,
+}) {
+  const normalizedToken =
+    String(
+      accessToken || "",
+    ).trim();
+
+  if (!normalizedToken) {
+    throw new Error(
+      "El servidor no devolvió un token de acceso válido.",
+    );
   }
 
-  // NO guardar access_token en localStorage
-  // El backend lo maneja como cookie HttpOnly
-  
-  // Guardar solo metadatos del usuario (nombre, email, rol - NO sensible)
-  if (user) {
-    const safeUser = {
-      nombre: user.nombre,
-      gmail: user.gmail,
-      role: user.role,
-    };
-    localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
-  }
+  sessionStorage.setItem(
+    ACCESS_TOKEN_KEY,
+    normalizedToken,
+  );
+
+  sessionStorage.setItem(
+    USER_KEY,
+    JSON.stringify(
+      user ?? null,
+    ),
+  );
 }
 
 /**
- * Obtiene el access token.
- * 
- * NOTA: El token real está en cookie HttpOnly (no accesible desde JS).
- * Esta función se mantiene por compatibilidad con código existente,
- * pero el token real se envía automáticamente en las cookies.
- * 
- * @returns {string|null} Siempre retorna null (el token está en cookie)
+ * Obtiene el access token almacenado.
  */
 export function getAccessToken() {
-  // El token está en cookie HttpOnly, no en localStorage
-  // El interceptor de axios (withCredentials: true) lo envía automáticamente
-  return null;
+  const token =
+    sessionStorage.getItem(
+      ACCESS_TOKEN_KEY,
+    );
+
+  return token
+    ? token.trim()
+    : null;
 }
 
 /**
- * Obtiene metadatos del usuario almacenados localmente.
- * Solo contiene datos NO sensibles (nombre, email, rol).
+ * Obtiene los datos del usuario almacenado.
  */
 export function getStoredUser() {
-  const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
+  const rawUser =
+    sessionStorage.getItem(
+      USER_KEY,
+    );
+
+  if (!rawUser) {
+    return null;
+  }
 
   try {
-    return JSON.parse(raw);
+    return JSON.parse(
+      rawUser,
+    );
   } catch {
     clearSession();
     return null;
@@ -74,24 +79,23 @@ export function getStoredUser() {
 }
 
 /**
- * Limpia la sesión local.
- * 
- * NOTA: Las cookies HttpOnly las elimina el backend en /auth/logout.
- * Esta función solo limpia los metadatos locales del usuario.
+ * Indica si existe una sesión local.
  */
-export function clearSession() {
-  localStorage.removeItem(USER_KEY);
+export function hasSession() {
+  return Boolean(
+    getAccessToken(),
+  );
 }
 
 /**
- * Verifica si hay una sesión activa.
- * 
- * NOTA: Como el token está en cookie HttpOnly, no podemos verificarlo
- * desde JS. Esta función verifica si hay metadatos de usuario guardados.
- * La verificación real la hace el backend en /auth/me.
- * 
- * @returns {boolean} true si hay metadatos de usuario
+ * Elimina completamente la sesión local.
  */
-export function hasSession() {
-  return Boolean(localStorage.getItem(USER_KEY));
+export function clearSession() {
+  sessionStorage.removeItem(
+    ACCESS_TOKEN_KEY,
+  );
+
+  sessionStorage.removeItem(
+    USER_KEY,
+  );
 }
