@@ -622,23 +622,69 @@ export default function ChatScreen({ user, onLogout }) {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "");
 
+    const hasExtrasSection =
+      normalized.includes("extras disponibles");
+
+    const hasProducts =
+      /[•\-]\s*\d+\s*[×x]\s*pizza\s+/i.test(
+        String(reply || "")
+      );
+
+    const isCurrentBackendPrompt =
+      normalized.includes(
+        "puedes agregar extras a las pizzas"
+      ) ||
+      normalized.includes(
+        "puedes agregar extras a la pizza"
+      ) ||
+      normalized.includes(
+        "agregar extras a las pizzas o refrescos al pedido"
+      );
+
+    const isLegacyPrompt =
+      normalized.includes(
+        "indica a cuales pizzas deseas agregar extras"
+      ) ||
+      (
+        normalized.includes("cuantas unidades") &&
+        normalized.includes("cuales extras")
+      );
+
     return (
-      normalized.includes("indica a cuales pizzas deseas agregar extras") &&
-      normalized.includes("cuantas unidades") &&
-      normalized.includes("cuales extras")
+      hasProducts &&
+      hasExtrasSection &&
+      (
+        isCurrentBackendPrompt ||
+        isLegacyPrompt
+      )
     );
   };
 
   const extractRegisteredProducts = (reply = "") => {
     const products = [];
-    const regex = /[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n]+)/gi;
+    const regex =
+      /[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n—–]+)/gi;
+
     let match;
 
-    while ((match = regex.exec(reply)) !== null) {
-      products.push({
-        quantity: Number(match[1]),
-        name: match[2].trim(),
-      });
+    while (
+      (match = regex.exec(String(reply || ""))) !== null
+    ) {
+      const quantity = Number(match[1]);
+      const name = String(match[2] || "")
+        .replace(/[.:;,]+$/, "")
+        .trim();
+
+      if (
+        Number.isFinite(quantity) &&
+        quantity > 0 &&
+        name
+      ) {
+        products.push({
+          quantity,
+          name,
+        });
+      }
     }
 
     return products;
@@ -787,12 +833,27 @@ export default function ChatScreen({ user, onLogout }) {
         requiresOrderConfirmation: orderConfirmationPrompt,
       });
 
-      if (targetedExtrasPrompt) {
+      if (
+        targetedExtrasPrompt &&
+        extrasProducts.length > 0
+      ) {
         setExtrasPrompt({
-          messageId: botMessage?.id || Date.now(),
-          products: extrasProducts,
+          messageId:
+            botMessage?.id ||
+            Date.now(),
+
+          products:
+            extrasProducts,
         });
+
         setExtrasInput("");
+        setSelectedExtras([]);
+        setBeverageQuantity(1);
+      } else if (targetedExtrasPrompt) {
+        console.warn(
+          "Se detectó un prompt de extras, pero no se pudieron extraer las pizzas:",
+          data.reply
+        );
       }
 
       const paymentPrompt =

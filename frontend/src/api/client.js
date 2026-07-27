@@ -1,246 +1,245 @@
-import {
-  clearSession,
-  getAccessToken,
-} from "../utils/session";
+/**
+ * API Client — Pizzería 220 AI
+ * 
+ * Cliente HTTP con manejo automático de refresh tokens.
+ * 
+ * Características:
+ * - Interceptor de respuestas 401 → refresh automático
+ * - Cookies HttpOnly para tokens (no localStorage)
+ * - Cola de requests pendientes durante refresh
+ * - Manejo de concurrencia
+ */
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000"
-).replace(/\/+$/, "");
+import axios from 'axios';
 
-function formatValidationDetail(detail) {
-  if (!Array.isArray(detail)) {
-    return null;
-  }
+// ============================================================================
+// CONFIGURACIÓN
+// ============================================================================
 
-  return detail
-    .map((item) => {
-      const path = Array.isArray(item?.loc)
-        ? item.loc
-            .filter(
-              (part) =>
-                part !== "body" &&
-                part !== "query",
-            )
-            .join(".")
-        : "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-      const message =
-        typeof item?.msg === "string"
-          ? item.msg
-          : "Valor inválido";
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  withCredentials: true,  // Importante: envía cookies HttpOnly
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  },
+});
 
-      return path
-        ? `${path}: ${message}`
-        : message;
-    })
-    .filter(Boolean)
-    .join("\n");
+// ============================================================================
+// ESTADO DE REFRESH
+// ============================================================================
+
+let isRefreshing = false;
+let failedQueue = [];
+
+function processQueue(error, token = null) {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
 }
 
-export function getApiErrorMessage(
-  data,
-  fallback = "No fue posible procesar la solicitud",
-) {
-  const validationMessage =
-    formatValidationDetail(data?.detail);
+// ============================================================================
+// INTERCEPTOR DE RESPUESTAS
+// ============================================================================
 
-  if (validationMessage) {
-    return validationMessage;
-  }
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
 
-  if (typeof data?.detail === "string") {
-    return data.detail;
-  }
-
-  if (typeof data?.message === "string") {
-    return data.message;
-  }
-
-  if (typeof data?.error === "string") {
-    return data.error;
-  }
-
-  return fallback;
-}
-
-function buildHeaders({
-  body,
-  headers = {},
-  authenticated = true,
-}) {
-  const nextHeaders = new Headers(headers);
-
-  if (
-    body !== undefined &&
-    !(body instanceof FormData)
-  ) {
-    nextHeaders.set(
-      "Content-Type",
-      "application/json",
-    );
-  }
-
-  if (authenticated) {
-    const token = getAccessToken();
-
-    if (!token) {
-      throw new Error(
-        "Tu sesión terminó. Inicia sesión nuevamente.",
-      );
+    // Solo intentar refresh si:
+    // 1. Es error 401
+    // 2. No es una request de refresh
+    // 3. No se ha reintentado ya
+    if (
+      error.response?.status !== 401 ||
+      originalRequest.url?.includes('/auth/refresh') ||
+      originalRequest._retry
+    ) {
+      return Promise.reject(error);
     }
 
-    nextHeaders.set(
-      "Authorization",
-      `Bearer ${token}`,
-    );
-  }
+    // Si ya se está refrescando, encolar la request
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then(() => {
+        return api(originalRequest);
+      });
+    }
 
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    nextHeaders.set(
-      "X-Request-ID",
-      crypto.randomUUID(),
-    );
-  }
+    originalRequest._retry = true;
+    isRefreshing = true;
 
-  return nextHeaders;
-}
-
-async function readResponseData(response) {
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  if (
-    contentType.includes("application/json")
-  ) {
     try {
-      return await response.json();
-    } catch {
-      return {};
+      // Intentar refresh con cookie HttpOnly
+      await api.post('/auth/refresh');
+      
+      // Procesar cola de requests pendientes
+      processQueue(null);
+      
+      // Reintentar request original
+      return api(originalRequest);
+    } catch (refreshError) {
+      // Si falla el refresh, rechazar todas las requests pendientes
+      processQueue(refreshError);
+      
+      // Redirigir al login
+      window.location.href = '/login';
+      
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
     }
   }
+);
 
+// ============================================================================
+// FUNCIONES DE AUTENTICACIÓN
+// ============================================================================
+
+export async function login(gmail, password) {
+  const response = await api.post('/auth/login', { gmail, password });
+  return response.data;
+}
+
+export async function register(userData) {
+  const response = await api.post('/auth/register', userData);
+  return response.data;
+}
+
+export async function logout() {
   try {
-    return {
-      detail: await response.text(),
-    };
-  } catch {
-    return {};
+    await api.post('/auth/logout');
+  } finally {
+    window.location.href = '/login';
   }
 }
 
-async function validateResponse(response) {
-  const data = await readResponseData(response);
-
-  if (response.status === 401) {
-    clearSession();
-
-    window.dispatchEvent(
-      new CustomEvent("p220:unauthorized"),
-    );
-
-    const error = new Error(
-      "Tu sesión expiró. Inicia sesión nuevamente.",
-    );
-
-    error.status = 401;
-    error.data = data;
-    throw error;
-  }
-
-  if (response.status === 429) {
-    const retryAfter =
-      response.headers.get("retry-after") ||
-      data?.retry_after ||
-      "unos segundos";
-
-    const error = new Error(
-      `Demasiadas solicitudes. Intenta de nuevo en ${retryAfter}.`,
-    );
-
-    error.status = 429;
-    error.data = data;
-    throw error;
-  }
-
-  if (!response.ok) {
-    const error = new Error(
-      getApiErrorMessage(
-        data,
-        `Error HTTP ${response.status}`,
-      ),
-    );
-
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-
-  return data;
+export async function getMe() {
+  const response = await api.get('/auth/me');
+  return response.data;
 }
 
-export async function apiRequest(
-  path,
-  {
-    method = "GET",
-    body,
-    headers,
-    authenticated = true,
-    signal,
-  } = {},
-) {
-  const response = await fetch(
-    `${API_BASE_URL}${path}`,
-    {
-      method,
-      headers: buildHeaders({
-        body,
-        headers,
-        authenticated,
-      }),
-      body:
-        body === undefined
-          ? undefined
-          : body instanceof FormData
-            ? body
-            : JSON.stringify(body),
-      signal,
-      credentials: "omit",
-    },
-  );
-
-  return validateResponse(response);
+export async function refreshToken() {
+  const response = await api.post('/auth/refresh');
+  return response.data;
 }
 
-export async function apiBlobRequest(
-  path,
-  {
-    headers,
-    authenticated = true,
-    signal,
-  } = {},
-) {
-  const response = await fetch(
-    `${API_BASE_URL}${path}`,
-    {
-      method: "GET",
-      headers: buildHeaders({
-        headers,
-        authenticated,
-      }),
-      signal,
-      credentials: "omit",
-    },
-  );
+// ============================================================================
+// FUNCIONES DE CHAT
+// ============================================================================
 
-  if (!response.ok) {
-    await validateResponse(response);
-  }
-
-  return response.blob();
+export async function sendMessage(message, options = {}) {
+  const response = await api.post('/chat', {
+    message,
+    use_cache: options.useCache ?? true,
+    save_history: options.saveHistory ?? true,
+  });
+  return response.data;
 }
 
-export { API_BASE_URL };
+export async function getChatHistory(limit = 50) {
+  const response = await api.get('/chat/history', { params: { limit } });
+  return response.data;
+}
+
+export async function deleteChatHistory() {
+  const response = await api.delete('/chat/history');
+  return response.data;
+}
+
+// ============================================================================
+// FUNCIONES DE ÓRDENES
+// ============================================================================
+
+export async function createOrder(orderData) {
+  const response = await api.post('/order', orderData);
+  return response.data;
+}
+
+export async function getOrderStatus(orderId) {
+  const response = await api.get(`/order/${orderId}/status`);
+  return response.data;
+}
+
+export async function cancelOrder(orderId) {
+  const response = await api.post(`/order/${orderId}/cancel`);
+  return response.data;
+}
+
+// ============================================================================
+// FUNCIONES DE VOZ
+// ============================================================================
+
+export async function transcribeAudio(audioBlob, language = 'es') {
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'recording.webm');
+  formData.append('language', language);
+  
+  const response = await api.post('/voice/transcribe', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  });
+  return response.data;
+}
+
+export async function getVoiceHistory(limit = 10) {
+  const response = await api.get('/voice/history', { params: { limit } });
+  return response.data;
+}
+
+// ============================================================================
+// FUNCIONES DE MAPAS
+// ============================================================================
+
+export async function reverseGeocode(lat, lng) {
+  const response = await api.get('/maps/reverse', { params: { lat, lng } });
+  return response.data;
+}
+
+export async function searchAddress(query) {
+  const response = await api.get('/maps/search', { params: { q: query } });
+  return response.data;
+}
+
+export async function getStaticMap(lat, lng, zoom = 16) {
+  const response = await api.get('/maps/static', {
+    params: { lat, lng, zoom },
+    responseType: 'blob',
+  });
+  return response.data;
+}
+
+// ============================================================================
+// FUNCIONES DE CACHÉ
+// ============================================================================
+
+export async function getCacheStats() {
+  const response = await api.get('/cache/stats');
+  return response.data;
+}
+
+export async function clearCache() {
+  const response = await api.post('/cache/clear');
+  return response.data;
+}
+
+// ============================================================================
+// FUNCIONES DE SALUD
+// ============================================================================
+
+export async function healthCheck() {
+  const response = await api.get('/health');
+  return response.data;
+}
+
+export default api;
