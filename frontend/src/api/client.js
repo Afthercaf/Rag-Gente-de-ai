@@ -1,49 +1,169 @@
 /**
  * API Client — Pizzería 220 AI
- * 
+ *
  * Cliente HTTP con manejo automático de refresh tokens.
- * 
+ *
  * Características:
- * - Interceptor de respuestas 401 → refresh automático
- * - Cookies HttpOnly para tokens (no localStorage)
- * - Cola de requests pendientes durante refresh
- * - Manejo de concurrencia
+ * - Interceptor de respuestas 401
+ * - Refresh automático
+ * - Cookies HttpOnly
+ * - Cola de solicitudes pendientes durante el refresh
+ * - Sin redirecciones directas a /login
  */
 
-import axios from 'axios';
+import axios from "axios";
 
 // ============================================================================
 // CONFIGURACIÓN
 // ============================================================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:8000";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
-  withCredentials: true,  // Importante: envía cookies HttpOnly
+  withCredentials: true,
+
   headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
+    Accept: "application/json",
+    "Content-Type": "application/json",
   },
 });
 
 // ============================================================================
-// ESTADO DE REFRESH
+// ESTADO DEL REFRESH
 // ============================================================================
 
 let isRefreshing = false;
 let failedQueue = [];
 
-function processQueue(error, token = null) {
-  failedQueue.forEach(prom => {
+function processQueue(
+  error,
+  token = null,
+) {
+  failedQueue.forEach((promise) => {
     if (error) {
-      prom.reject(error);
+      promise.reject(error);
     } else {
-      prom.resolve(token);
+      promise.resolve(token);
     }
   });
+
   failedQueue = [];
+}
+
+function notifyUnauthorized() {
+  window.dispatchEvent(
+    new CustomEvent(
+      "p220:unauthorized",
+    ),
+  );
+}
+
+// ============================================================================
+// NORMALIZACIÓN DE ERRORES
+// ============================================================================
+
+function getErrorMessage(error) {
+  const responseData =
+    error?.response?.data;
+
+  const detail =
+    responseData?.detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (
+          typeof item === "string"
+        ) {
+          return item;
+        }
+
+        if (
+          item &&
+          typeof item === "object"
+        ) {
+          const location =
+            Array.isArray(item.loc)
+              ? item.loc.join(".")
+              : "";
+
+          const message =
+            item.msg ||
+            item.message ||
+            "Error de validación";
+
+          return location
+            ? `${location}: ${message}`
+            : message;
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+
+    if (messages.length > 0) {
+      return messages.join("\n");
+    }
+  }
+
+  if (
+    detail &&
+    typeof detail === "object"
+  ) {
+    return (
+      detail.message ||
+      detail.msg ||
+      "Error al procesar la solicitud."
+    );
+  }
+
+  if (
+    typeof detail === "string"
+  ) {
+    return detail;
+  }
+
+  if (
+    typeof responseData?.message ===
+    "string"
+  ) {
+    return responseData.message;
+  }
+
+  if (
+    typeof responseData?.error ===
+    "string"
+  ) {
+    return responseData.error;
+  }
+
+  if (error?.message) {
+    return error.message;
+  }
+
+  return "Error de comunicación con el servidor.";
+}
+
+function normalizeError(error) {
+  const normalizedError =
+    new Error(
+      getErrorMessage(error),
+    );
+
+  normalizedError.status =
+    error?.response?.status;
+
+  normalizedError.data =
+    error?.response?.data;
+
+  normalizedError.originalError =
+    error;
+
+  return normalizedError;
 }
 
 // ============================================================================
@@ -52,194 +172,479 @@ function processQueue(error, token = null) {
 
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
 
-    // Solo intentar refresh si:
-    // 1. Es error 401
-    // 2. No es una request de refresh
-    // 3. No se ha reintentado ya
-    if (
-      error.response?.status !== 401 ||
-      originalRequest.url?.includes('/auth/refresh') ||
-      originalRequest._retry
-    ) {
-      return Promise.reject(error);
+  async (error) => {
+    const originalRequest =
+      error?.config;
+
+    if (!originalRequest) {
+      return Promise.reject(
+        normalizeError(error),
+      );
     }
 
-    // Si ya se está refrescando, encolar la request
+    const status =
+      error?.response?.status;
+
+    const requestUrl =
+      String(
+        originalRequest.url || "",
+      );
+
+    const isAuthRequest =
+      requestUrl.includes(
+        "/auth/login",
+      ) ||
+      requestUrl.includes(
+        "/auth/register",
+      );
+
+    const isRefreshRequest =
+      requestUrl.includes(
+        "/auth/refresh",
+      );
+
+    /*
+     * Solo se intenta refresh cuando:
+     * - el backend responde 401;
+     * - no es login o registro;
+     * - no es la propia ruta de refresh;
+     * - la solicitud no se ha reintentado.
+     */
+    if (
+      status !== 401 ||
+      isAuthRequest ||
+      isRefreshRequest ||
+      originalRequest._retry
+    ) {
+      return Promise.reject(
+        normalizeError(error),
+      );
+    }
+
+    /*
+     * Si ya existe un refresh activo, esta solicitud
+     * queda en espera.
+     */
     if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        failedQueue.push({ resolve, reject });
-      }).then(() => {
-        return api(originalRequest);
-      });
+      return new Promise(
+        (resolve, reject) => {
+          failedQueue.push({
+            resolve,
+            reject,
+          });
+        },
+      )
+        .then(() =>
+          api(originalRequest),
+        )
+        .catch((queueError) =>
+          Promise.reject(
+            normalizeError(queueError),
+          ),
+        );
     }
 
     originalRequest._retry = true;
     isRefreshing = true;
 
     try {
-      // Intentar refresh con cookie HttpOnly
-      await api.post('/auth/refresh');
-      
-      // Procesar cola de requests pendientes
+      /*
+       * El refresh usa la cookie HttpOnly.
+       * No se envía token manualmente.
+       */
+      await api.post(
+        "/auth/refresh",
+      );
+
       processQueue(null);
-      
-      // Reintentar request original
+
       return api(originalRequest);
     } catch (refreshError) {
-      // Si falla el refresh, rechazar todas las requests pendientes
-      processQueue(refreshError);
-      
-      // Redirigir al login
-      window.location.href = '/login';
-      
-      return Promise.reject(refreshError);
+      processQueue(
+        refreshError,
+      );
+
+      /*
+       * No se utiliza:
+       *
+       * window.location.href = "/login";
+       *
+       * porque Render puede responder Not Found
+       * al acceder directamente a esa ruta.
+       */
+      notifyUnauthorized();
+
+      return Promise.reject(
+        normalizeError(
+          refreshError,
+        ),
+      );
     } finally {
       isRefreshing = false;
     }
-  }
+  },
 );
 
 // ============================================================================
-// FUNCIONES DE AUTENTICACIÓN
+// AUTENTICACIÓN
 // ============================================================================
 
-export async function login(gmail, password) {
-  const response = await api.post('/auth/login', { gmail, password });
-  return response.data;
+export async function login(
+  gmail,
+  password,
+) {
+  try {
+    const response = await api.post(
+      "/auth/login",
+      {
+        gmail,
+        password,
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
-export async function register(userData) {
-  const response = await api.post('/auth/register', userData);
-  return response.data;
+export async function register(
+  userData,
+) {
+  try {
+    const response = await api.post(
+      "/auth/register",
+      userData,
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 export async function logout() {
   try {
-    await api.post('/auth/logout');
-  } finally {
-    window.location.href = '/login';
+    const response = await api.post(
+      "/auth/logout",
+    );
+
+    return response.data;
+  } catch (error) {
+    /*
+     * Aunque el backend falle, notificamos al frontend
+     * para limpiar la sesión local.
+     */
+    throw normalizeError(error);
   }
 }
 
 export async function getMe() {
-  const response = await api.get('/auth/me');
-  return response.data;
+  try {
+    const response = await api.get(
+      "/auth/me",
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 export async function refreshToken() {
-  const response = await api.post('/auth/refresh');
-  return response.data;
+  try {
+    const response = await api.post(
+      "/auth/refresh",
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 // ============================================================================
-// FUNCIONES DE CHAT
+// CHAT
 // ============================================================================
 
-export async function sendMessage(message, options = {}) {
-  const response = await api.post('/chat', {
-    message,
-    use_cache: options.useCache ?? true,
-    save_history: options.saveHistory ?? true,
-  });
-  return response.data;
+export async function sendMessage(
+  message,
+  options = {},
+) {
+  try {
+    const response = await api.post(
+      "/chat",
+      {
+        message,
+        use_cache:
+          options.useCache ?? true,
+        save_history:
+          options.saveHistory ?? true,
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
-export async function getChatHistory(limit = 50) {
-  const response = await api.get('/chat/history', { params: { limit } });
-  return response.data;
+export async function getChatHistory(
+  limit = 50,
+) {
+  try {
+    const response = await api.get(
+      "/chat/history",
+      {
+        params: {
+          limit,
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 export async function deleteChatHistory() {
-  const response = await api.delete('/chat/history');
-  return response.data;
+  try {
+    const response =
+      await api.delete(
+        "/chat/history",
+      );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 // ============================================================================
-// FUNCIONES DE ÓRDENES
+// ÓRDENES
 // ============================================================================
 
-export async function createOrder(orderData) {
-  const response = await api.post('/order', orderData);
-  return response.data;
+export async function createOrder(
+  orderData,
+) {
+  try {
+    const response = await api.post(
+      "/order",
+      orderData,
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
-export async function getOrderStatus(orderId) {
-  const response = await api.get(`/order/${orderId}/status`);
-  return response.data;
+export async function getOrderStatus(
+  orderId,
+) {
+  try {
+    const response = await api.get(
+      `/order/${orderId}/status`,
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
-export async function cancelOrder(orderId) {
-  const response = await api.post(`/order/${orderId}/cancel`);
-  return response.data;
-}
+export async function cancelOrder(
+  orderId,
+) {
+  try {
+    const response = await api.post(
+      `/order/${orderId}/cancel`,
+    );
 
-// ============================================================================
-// FUNCIONES DE VOZ
-// ============================================================================
-
-export async function transcribeAudio(audioBlob, language = 'es') {
-  const formData = new FormData();
-  formData.append('audio', audioBlob, 'recording.webm');
-  formData.append('language', language);
-  
-  const response = await api.post('/voice/transcribe', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 60000,
-  });
-  return response.data;
-}
-
-export async function getVoiceHistory(limit = 10) {
-  const response = await api.get('/voice/history', { params: { limit } });
-  return response.data;
-}
-
-// ============================================================================
-// FUNCIONES DE MAPAS
-// ============================================================================
-
-export async function reverseGeocode(lat, lng) {
-  const response = await api.get('/maps/reverse', { params: { lat, lng } });
-  return response.data;
-}
-
-export async function searchAddress(query) {
-  const response = await api.get('/maps/search', { params: { q: query } });
-  return response.data;
-}
-
-export async function getStaticMap(lat, lng, zoom = 16) {
-  const response = await api.get('/maps/static', {
-    params: { lat, lng, zoom },
-    responseType: 'blob',
-  });
-  return response.data;
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 // ============================================================================
-// FUNCIONES DE CACHÉ
+// VOZ
+// ============================================================================
+
+export async function transcribeAudio(
+  audioBlob,
+  language = "es-ES",
+) {
+  const formData =
+    new FormData();
+
+  formData.append(
+    "audio",
+    audioBlob,
+    "recording.webm",
+  );
+
+  formData.append(
+    "language",
+    language,
+  );
+
+  try {
+    /*
+     * No se define manualmente Content-Type.
+     * Axios agrega multipart/form-data junto con
+     * el boundary correcto.
+     */
+    const response = await api.post(
+      "/voice/transcribe",
+      formData,
+      {
+        timeout: 60000,
+
+        headers: {
+          "Content-Type": undefined,
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getVoiceHistory(
+  limit = 10,
+) {
+  try {
+    const response = await api.get(
+      "/voice/history",
+      {
+        params: {
+          limit,
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+// ============================================================================
+// MAPAS
+// ============================================================================
+
+export async function reverseGeocode(
+  lat,
+  lng,
+) {
+  try {
+    const response = await api.get(
+      "/maps/reverse",
+      {
+        params: {
+          lat,
+          lng,
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function searchAddress(
+  query,
+) {
+  try {
+    const response = await api.get(
+      "/maps/search",
+      {
+        params: {
+          q: query,
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getStaticMap(
+  lat,
+  lng,
+  zoom = 16,
+) {
+  try {
+    const response = await api.get(
+      "/maps/static",
+      {
+        params: {
+          lat,
+          lng,
+          zoom,
+        },
+
+        responseType: "blob",
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+// ============================================================================
+// CACHÉ
 // ============================================================================
 
 export async function getCacheStats() {
-  const response = await api.get('/cache/stats');
-  return response.data;
+  try {
+    const response = await api.get(
+      "/cache/stats",
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 export async function clearCache() {
-  const response = await api.post('/cache/clear');
-  return response.data;
+  try {
+    const response = await api.post(
+      "/cache/clear",
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 // ============================================================================
-// FUNCIONES DE SALUD
+// SALUD
 // ============================================================================
 
 export async function healthCheck() {
-  const response = await api.get('/health');
-  return response.data;
+  try {
+    const response = await api.get(
+      "/health",
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
 }
 
 export default api;
