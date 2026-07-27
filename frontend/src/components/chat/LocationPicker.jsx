@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { apiBlobRequest, apiRequest } from "../../api/client";
+import {
+  getStaticMap,
+  reverseGeocode,
+  searchAddress,
+} from "../../api/client";
 
 import "../../styles/theme.css";
 
@@ -33,13 +37,9 @@ export default function LocationPicker({
 
   const getAddressFromCoords = async (lat, lng) => {
     try {
-      const params = new URLSearchParams({
-        lat: String(lat),
-        lng: String(lng),
-      });
-
-      const data = await apiRequest(
-        `/maps/reverse?${params.toString()}`,
+      const data = await reverseGeocode(
+        lat,
+        lng,
       );
 
       if (
@@ -153,12 +153,8 @@ export default function LocationPicker({
     setError(null);
 
     try {
-      const params = new URLSearchParams({
-        q: normalizedSearch,
-      });
-
-      const data = await apiRequest(
-        `/maps/search?${params.toString()}`,
+      const data = await searchAddress(
+        normalizedSearch,
       );
 
       if (!isMounted.current) {
@@ -244,17 +240,11 @@ export default function LocationPicker({
         return;
       }
 
-      const params = new URLSearchParams({
-        lat: String(coordinates.lat),
-        lng: String(coordinates.lng),
-        zoom: "16",
-        width: "400",
-        height: "200",
-      });
-
       try {
-        const blob = await apiBlobRequest(
-          `/maps/static?${params.toString()}`,
+        const blob = await getStaticMap(
+          coordinates.lat,
+          coordinates.lng,
+          16,
         );
 
         if (cancelled || !isMounted.current) {

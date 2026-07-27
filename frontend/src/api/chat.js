@@ -1,4 +1,13 @@
-import { apiRequest } from "./client";
+/**
+ * Chat & Orders API — Pizzería 220 AI
+ * 
+ * Funciones para chat y órdenes usando el cliente HTTP con cookies HttpOnly.
+ * 
+ * El usuario autenticado se obtiene del JWT en el backend (cookie HttpOnly).
+ * No se envía user_id, total, role ni status desde el frontend.
+ */
+
+import { sendMessage as apiSendMessage, getChatHistory as apiGetHistory, deleteChatHistory as apiDeleteHistory, createOrder, getOrderStatus as apiGetOrderStatus, cancelOrder as apiCancelOrder } from "./client";
 
 /**
  * Envía un mensaje al asistente.
@@ -20,15 +29,9 @@ export function sendChat(
     );
   }
 
-  return apiRequest("/chat", {
-    method: "POST",
-    body: {
-      message: normalizedMessage,
-      use_cache:
-        options.useCache ?? false,
-      save_history:
-        options.saveHistory ?? true,
-    },
+  return apiSendMessage(normalizedMessage, {
+    useCache: options.useCache ?? false,
+    saveHistory: options.saveHistory ?? true,
   });
 }
 
@@ -46,18 +49,14 @@ export function getChatHistory(
     ),
   );
 
-  return apiRequest(
-    `/chat/history?limit=${safeLimit}`,
-  );
+  return apiGetHistory(safeLimit);
 }
 
 /**
  * Elimina el historial del usuario autenticado.
  */
 export function deleteChatHistory() {
-  return apiRequest("/chat/history", {
-    method: "DELETE",
-  });
+  return apiDeleteHistory();
 }
 
 /**
@@ -308,10 +307,7 @@ export function placeOrder(
     ),
   );
 
-  return apiRequest("/order", {
-    method: "POST",
-    body: payload,
-  });
+  return createOrder(payload);
 }
 
 /**
@@ -329,11 +325,7 @@ export function getOrderStatus(
     );
   }
 
-  return apiRequest(
-    `/order/${encodeURIComponent(
-      normalizedOrderId,
-    )}/status`,
-  );
+  return apiGetOrderStatus(normalizedOrderId);
 }
 
 /**
@@ -341,7 +333,7 @@ export function getOrderStatus(
  */
 export function cancelOrder(
   orderId,
-  reason = "",
+  _reason = "",
 ) {
   const normalizedOrderId =
     String(orderId || "").trim();
@@ -352,23 +344,5 @@ export function cancelOrder(
     );
   }
 
-  const normalizedReason =
-    String(reason || "").trim();
-
-  const query =
-    normalizedReason
-      ? `?reason=${encodeURIComponent(
-          normalizedReason,
-        )}`
-      : "";
-
-  return apiRequest(
-    `/order/${encodeURIComponent(
-      normalizedOrderId,
-    )}/cancel${query}`,
-    {
-      method: "POST",
-      body: {},
-    },
-  );
+  return apiCancelOrder(normalizedOrderId);
 }
