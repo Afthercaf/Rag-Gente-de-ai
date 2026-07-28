@@ -173,6 +173,8 @@ function normalizeOrderData(
       paymentMethod,
     ubicacion:
       normalizedLocation,
+    user_id:
+      data?.user_id || "",
   };
 }
 

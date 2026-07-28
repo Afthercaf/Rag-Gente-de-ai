@@ -1060,6 +1060,7 @@ export default function ChatScreen({ user, onLogout }) {
           orderData.data?.payment_method === "mercado_pago"
             ? "mercado_pago"
             : "efectivo",
+        user_id: user?.id || "",
       };
 
       const missingFields = [];
