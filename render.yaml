@@ -8,7 +8,7 @@ services:
 
     envVars:
       - key: VITE_API_URL
-        value: https://killerexpert10.tail29c8ce.ts.net
+        sync: false
 
     headers:
       - path: /*
@@ -29,10 +29,6 @@ services:
       - path: /*
         name: Cross-Origin-Resource-Policy
         value: same-origin
-      - path: /*
-        name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://killerexpert10.tail29c8ce.ts.net; img-src 'self' data:; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-
     routes:
       - type: rewrite
         source: /*
