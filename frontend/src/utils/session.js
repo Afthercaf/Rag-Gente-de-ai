@@ -1,21 +1,15 @@
-const USER_KEY =
-  "p220_user";
+let currentUser = null;
 
 /**
- * ✅ M-01 FIX: El access token ya no se almacena en sessionStorage.
+ * El access token viaja exclusivamente en cookie HttpOnly.
  * Viaja en cookie HttpOnly (access_token en desarrollo,
  * __Host-access_token en producción), no accesible por JS.
- * Solo guardamos datos básicos no sensibles del usuario.
+ * Los datos visuales del usuario viven únicamente en memoria.
  */
 export function saveSession({
   user,
 }) {
-  sessionStorage.setItem(
-    USER_KEY,
-    JSON.stringify(
-      user ?? null,
-    ),
-  );
+  currentUser = user ?? null;
 }
 
 /**
@@ -30,23 +24,7 @@ export function getAccessToken() {
  * Obtiene los datos básicos del usuario almacenado.
  */
 export function getStoredUser() {
-  const rawUser =
-    sessionStorage.getItem(
-      USER_KEY,
-    );
-
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(
-      rawUser,
-    );
-  } catch {
-    clearSession();
-    return null;
-  }
+  return currentUser;
 }
 
 /**
@@ -62,7 +40,5 @@ export function hasSession() {
  * Elimina completamente la sesión local.
  */
 export function clearSession() {
-  sessionStorage.removeItem(
-    USER_KEY,
-  );
+  currentUser = null;
 }

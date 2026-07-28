@@ -404,7 +404,7 @@
 
 
 import { useState, useRef, useEffect } from "react";
-import { sendChat, placeOrder } from "../../api/chat";
+import { getAvailableExtras, sendChat, placeOrder } from "../../api/chat";
 import { logout } from "../../api/auth";
 import { clearSession } from "../../utils/session";
 import { nextId, getOrderSteps } from "../../utils/orderUtils";
@@ -415,15 +415,6 @@ import { MessageBubble } from "./MessageBubble";
 import OrderStep from "./OrderStep";
 import { TypingIndicator, SendIcon } from "./ChatUIElements";
 import LocationPicker from "./LocationPicker";
-
-const AVAILABLE_EXTRAS = [
-  { name: "Queso extra", price: "$45.00 MXN" },
-  { name: "Orilla de queso", price: "$50.00 MXN" },
-  { name: "Pepperoni", price: "$45.00 MXN" },
-  { name: "Pimiento", price: "$45.00 MXN" },
-  { name: "Cebolla", price: "$45.00 MXN" },
-  { name: "Aceitunas y atún", price: "$45.00 MXN" },
-];
 
 function isAllowedPaymentUrl(value) {
   try {
@@ -458,6 +449,7 @@ export default function ChatScreen({ user, onLogout }) {
   const [extrasPrompt, setExtrasPrompt] = useState(null);
   const [extrasInput, setExtrasInput] = useState("");
   const [selectedExtras, setSelectedExtras] = useState([]);
+  const [availableExtras, setAvailableExtras] = useState([]);
   const [beverageQuantity, setBeverageQuantity] = useState(1);
   const [inputHint, setInputHint] = useState("");
   const [handledActionMessages, setHandledActionMessages] = useState([]);
@@ -501,6 +493,20 @@ export default function ChatScreen({ user, onLogout }) {
   useEffect(() => {
     return () => {
       if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getAvailableExtras()
+      .then((extras) => {
+        if (active) setAvailableExtras(extras);
+      })
+      .catch(() => {
+        if (active) setAvailableExtras([]);
+      });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -1425,7 +1431,7 @@ ${
                     <div>¿Le agregas algún extra a tu {extrasPrompt.products[0].name}?</div>
 
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {AVAILABLE_EXTRAS.map((extra) => (
+                      {availableExtras.map((extra) => (
                         <button
                           key={extra.name}
                           type="button"
@@ -1560,7 +1566,7 @@ ${
                       marginBottom: 12,
                     }}
                   >
-                    {AVAILABLE_EXTRAS.map((extra) => (
+                    {availableExtras.map((extra) => (
                       <div
                         key={extra.name}
                         style={{

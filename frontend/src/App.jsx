@@ -7,18 +7,11 @@ import ChatScreen from "./components/chat/ChatScreen";
 import { getCurrentUser } from "./api/auth";
 import {
   clearSession,
-  getStoredUser,
-  hasSession,
 } from "./utils/session";
 
 export default function App() {
-  const [screen, setScreen] = useState(() =>
-    hasSession() ? "loading" : "login"
-  );
-
-  const [user, setUser] = useState(() =>
-    getStoredUser()
-  );
+  const [screen, setScreen] = useState("loading");
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -29,12 +22,7 @@ export default function App() {
 
         if (!active) return;
 
-        const storedUser = getStoredUser();
-
-        setUser({
-          ...storedUser,
-          ...currentUser,
-        });
+        setUser(currentUser);
 
         setScreen("chat");
       } catch {

@@ -7,7 +7,7 @@
  * No se envía user_id, total, role ni status desde el frontend.
  */
 
-import { sendMessage as apiSendMessage, getChatHistory as apiGetHistory, deleteChatHistory as apiDeleteHistory, createOrder, getOrderStatus as apiGetOrderStatus, cancelOrder as apiCancelOrder } from "./client";
+import { sendMessage as apiSendMessage, getChatHistory as apiGetHistory, getAvailableExtras as apiGetAvailableExtras, deleteChatHistory as apiDeleteHistory, createOrder, getOrderStatus as apiGetOrderStatus, cancelOrder as apiCancelOrder } from "./client";
 
 /**
  * Envía un mensaje al asistente.
@@ -332,4 +332,8 @@ export function cancelOrder(
   }
 
   return apiCancelOrder(normalizedOrderId);
+}
+
+export function getAvailableExtras() {
+  return apiGetAvailableExtras();
 }

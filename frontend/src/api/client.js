@@ -601,6 +601,17 @@ export async function getChatHistory(
   }
 }
 
+export async function getAvailableExtras() {
+  try {
+    const response = await api.get("/chat/extras");
+    return Array.isArray(response.data?.extras)
+      ? response.data.extras
+      : [];
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function deleteChatHistory() {
   try {
     const response =
