@@ -431,6 +431,15 @@ function isAllowedPaymentUrl(value) {
   }
 }
 
+function isSafeQrBase64(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 1_400_000 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(value)
+  );
+}
+
 export default function ChatScreen({ user, onLogout }) {
   const [messages, setMessages] = useState([
     {
@@ -485,7 +494,7 @@ export default function ChatScreen({ user, onLogout }) {
         setMessages((prev) => prev.filter((m) => m.text !== `🎤 ${errorMsg}`));
       }, 4000);
     },
-    language: "es-ES",
+    language: "es-MX",
   });
 
   // Actualizar input con transcripción en tiempo real
@@ -1146,7 +1155,7 @@ export default function ChatScreen({ user, onLogout }) {
 
         if (payment && payment.method === "mercadopago") {
           // 1. QR Code (para pagos presenciales)
-          if (payment.qr_code_base64) {
+          if (isSafeQrBase64(payment.qr_code_base64)) {
             addMsg(
               "bot",
               `💳 Escanea este código QR con tu app de Mercado Pago para pagar.${
@@ -1318,7 +1327,7 @@ ${
                 <MessageBubble msg={msg} />
 
                 {/* QR Code */}
-                {msg.qrCodeBase64 && (
+                {isSafeQrBase64(msg.qrCodeBase64) && (
                   <div className="p220-qr-wrap">
                     <img
                       src={`data:image/png;base64,${msg.qrCodeBase64}`}

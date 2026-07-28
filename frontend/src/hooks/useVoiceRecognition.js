@@ -8,7 +8,7 @@ import api from "../api/client";
 export const useVoiceRecognition = ({
   onResult,
   onError,
-  language = "es-ES",
+  language = "es-MX",
 } = {}) => {
   const [isListening, setIsListening] = useState(false);
   const [isSupported] = useState(

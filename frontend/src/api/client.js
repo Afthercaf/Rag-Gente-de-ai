@@ -690,7 +690,7 @@ export async function cancelOrder(
 
 export async function transcribeAudio(
   audioBlob,
-  language = "es-ES",
+  language = "es-MX",
 ) {
   const formData =
     new FormData();

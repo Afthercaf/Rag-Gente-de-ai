@@ -22,7 +22,6 @@ __pycache__/
 .coverage
 security-results.xml
 chroma
-tests*
 
 # Runtime data
 transcriptions.json
@@ -54,4 +53,3 @@ env.key
 *.njsproj
 *.sln
 *.sw?
-tests/

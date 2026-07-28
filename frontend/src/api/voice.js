@@ -10,7 +10,7 @@ import {
  */
 export function transcribeAudio(
   audioBlob,
-  language = "es-ES",
+  language = "es-MX",
 ) {
   return apiTranscribeAudio(
     audioBlob,
