@@ -43,7 +43,7 @@ export function useOrderStatus(orderId) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
-      } catch (err) {
+      } catch {
         // Silencioso en producción
       }
     };

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   getStaticMap,
   reverseGeocode,
-  searchAddress,
+  searchAddress as searchAddressApi,
 } from "../../api/client";
 
 import "../../styles/theme.css";
@@ -19,7 +19,7 @@ export default function LocationPicker({
   const [coordinates, setCoordinates] = useState(null);
   const [mapUrl, setMapUrl] = useState(null);
 
-  const hasSelected = useRef(false);
+  const [hasSelected, setHasSelected] = useState(false);
   const isMounted = useRef(true);
   const searchInputRef = useRef(null);
 
@@ -45,7 +45,7 @@ export default function LocationPicker({
       if (
         data?.display_name &&
         isMounted.current &&
-        !hasSelected.current
+        !hasSelected
       ) {
         setAddress(data.display_name);
       }
@@ -60,7 +60,7 @@ export default function LocationPicker({
   };
 
   const getCurrentLocation = () => {
-    if (loading || hasSelected.current) {
+    if (loading || hasSelected) {
       return;
     }
 
@@ -144,7 +144,7 @@ export default function LocationPicker({
     if (
       !normalizedSearch ||
       loading ||
-      hasSelected.current
+      hasSelected
     ) {
       return;
     }
@@ -153,7 +153,7 @@ export default function LocationPicker({
     setError(null);
 
     try {
-      const data = await searchAddress(
+      const data = await searchAddressApi(
         normalizedSearch,
       );
 
@@ -191,7 +191,7 @@ export default function LocationPicker({
   };
 
   const handleConfirm = () => {
-    if (hasSelected.current) {
+    if (hasSelected) {
       return;
     }
 
@@ -202,7 +202,7 @@ export default function LocationPicker({
       return;
     }
 
-    hasSelected.current = true;
+    setHasSelected(true);
 
     onLocationSelect({
       lat: coordinates.lat,
@@ -215,12 +215,13 @@ export default function LocationPicker({
   };
 
   const handleClose = () => {
-    if (!loading && !hasSelected.current) {
+    if (!loading && !hasSelected) {
       onClose();
     }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     getCurrentLocation();
     // Solo debe solicitar la ubicación al montar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,13 +312,13 @@ export default function LocationPicker({
             className="p220-gps-btn"
             style={{
               opacity:
-                loading || hasSelected.current
+                loading || hasSelected
                   ? 0.5
                   : 1,
             }}
             onClick={getCurrentLocation}
             disabled={
-              loading || hasSelected.current
+              loading || hasSelected
             }
           >
             {loading
@@ -334,18 +335,18 @@ export default function LocationPicker({
               autoComplete="street-address"
               style={{
                 opacity:
-                  loading || hasSelected.current
+                  loading || hasSelected
                     ? 0.5
                     : 1,
               }}
               disabled={
-                loading || hasSelected.current
+                loading || hasSelected
               }
               onKeyDown={(event) => {
                 if (
                   event.key === "Enter" &&
                   !loading &&
-                  !hasSelected.current
+                  !hasSelected
                 ) {
                   event.preventDefault();
                   searchAddress(event.currentTarget.value);
@@ -357,7 +358,7 @@ export default function LocationPicker({
               type="button"
               className="p220-search-btn"
               disabled={
-                loading || hasSelected.current
+                loading || hasSelected
               }
               aria-label="Buscar dirección"
               onClick={() => {
@@ -417,12 +418,12 @@ export default function LocationPicker({
           <button
             type="button"
             className={`p220-confirm-btn${
-              hasSelected.current
+              hasSelected
                 ? " is-done"
                 : ""
             }`}
             style={
-              !hasSelected.current
+              !hasSelected
                 ? {
                     opacity: !coordinates
                       ? 0.5
@@ -433,11 +434,11 @@ export default function LocationPicker({
             onClick={handleConfirm}
             disabled={
               !coordinates ||
-              hasSelected.current ||
+              hasSelected ||
               loading
             }
           >
-            {hasSelected.current
+            {hasSelected
               ? "✓ Ubicación confirmada"
               : "✅ Confirmar ubicación"}
           </button>

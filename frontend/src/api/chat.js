@@ -173,8 +173,6 @@ function normalizeOrderData(
       paymentMethod,
     ubicacion:
       normalizedLocation,
-    user_id:
-      data?.user_id || "",
   };
 }
 
@@ -323,7 +321,6 @@ export function getOrderStatus(
  */
 export function cancelOrder(
   orderId,
-  _reason = "",
 ) {
   const normalizedOrderId =
     String(orderId || "").trim();

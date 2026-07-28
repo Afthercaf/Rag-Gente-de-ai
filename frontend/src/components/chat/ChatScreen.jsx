@@ -425,6 +425,21 @@ const AVAILABLE_EXTRAS = [
   { name: "Aceitunas y atún", price: "$45.00 MXN" },
 ];
 
+function isAllowedPaymentUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    return url.protocol === "https:" && (
+      host === "mercadopago.com" ||
+      host.endsWith(".mercadopago.com") ||
+      host === "mercadopago.com.mx" ||
+      host.endsWith(".mercadopago.com.mx")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function ChatScreen({ user, onLogout }) {
   const [messages, setMessages] = useState([
     {
@@ -440,7 +455,6 @@ export default function ChatScreen({ user, onLogout }) {
   const [pendingOrderData, setPendingOrderData] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
-  const [voiceError, setVoiceError] = useState(null);
   const [extrasPrompt, setExtrasPrompt] = useState(null);
   const [extrasInput, setExtrasInput] = useState("");
   const [selectedExtras, setSelectedExtras] = useState([]);
@@ -474,10 +488,8 @@ export default function ChatScreen({ user, onLogout }) {
       }
     },
     onError: (errorMsg) => {
-      setVoiceError(errorMsg);
       addMsg("bot", `🎤 ${errorMsg}`);
       setTimeout(() => {
-        setVoiceError(null);
         setMessages((prev) => prev.filter((m) => m.text !== `🎤 ${errorMsg}`));
       }, 4000);
     },
@@ -485,10 +497,6 @@ export default function ChatScreen({ user, onLogout }) {
   });
 
   // Actualizar input con transcripción en tiempo real
-  useEffect(() => {
-    if (isListening && transcript) setInput(transcript);
-  }, [transcript, isListening]);
-
   // Limpiar timeout al desmontar
   useEffect(() => {
     return () => {
@@ -515,6 +523,7 @@ export default function ChatScreen({ user, onLogout }) {
 
   // Reinicia la selección de extras cada vez que aparece un nuevo prompt.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedExtras([]);
   }, [extrasPrompt?.messageId]);
 
@@ -534,7 +543,12 @@ export default function ChatScreen({ user, onLogout }) {
     if (orderStatus !== "pendiente") addMsg("bot", `🔔 Actualización de tu pedido:\n${orderLabel}`);
   }, [orderStatus, activeOrderId, orderLabel]);
 
-  useEffect(() => { if (isDone) setActiveOrderId(null); }, [isDone]);
+  useEffect(() => {
+    if (isDone) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveOrderId(null);
+    }
+  }, [isDone]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -626,7 +640,7 @@ export default function ChatScreen({ user, onLogout }) {
       normalized.includes("extras disponibles");
 
     const hasProducts =
-      /[•\-]\s*\d+\s*[×x]\s*pizza\s+/i.test(
+      /[•-]\s*\d+\s*[×x]\s*pizza\s+/i.test(
         String(reply || "")
       );
 
@@ -663,7 +677,7 @@ export default function ChatScreen({ user, onLogout }) {
   const extractRegisteredProducts = (reply = "") => {
     const products = [];
     const regex =
-      /[•\-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n—–]+)/gi;
+      /[•-]\s*(\d+)\s*[×x]\s*Pizza\s+([^\n—–]+)/gi;
 
     let match;
 
@@ -1060,7 +1074,6 @@ export default function ChatScreen({ user, onLogout }) {
           orderData.data?.payment_method === "mercado_pago"
             ? "mercado_pago"
             : "efectivo",
-        user_id: user?.id || "",
       };
 
       const missingFields = [];
@@ -1310,7 +1323,7 @@ ${
                 )}
 
                 {/* Botón de pago Mercado Pago */}
-                {msg.paymentUrl && /^https:\/\//i.test(msg.paymentUrl) && (
+                {isAllowedPaymentUrl(msg.paymentUrl) && (
                   <div className="p220-pay-wrap">
                     {/* ✅ M-08 FIX: Solo renderizar URLs HTTPS externas verificadas. */}
                     <a

@@ -37,6 +37,10 @@ transcriptions.json
 # Archivos de tokens (contienen refresh tokens)
 refresh_tokens.json
 
+# Archivos cifrados en reposo (.env cifrado + clave)
+env.key
+.env.enc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -21,13 +21,6 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!hasSession()) {
-      clearSession();
-      setUser(null);
-      setScreen("login");
-      return;
-    }
-
     let active = true;
 
     const validateSession = async () => {

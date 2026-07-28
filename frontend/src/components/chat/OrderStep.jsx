@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 // Etiquetas visibles para cada valor real de payment_method.
 // Si se agrega un nuevo método de pago, solo hay que añadirlo aquí.
@@ -14,11 +14,6 @@ const PAYMENT_LABELS = {
  */
 export default function OrderStep({ step, onSubmit }) {
   const [val, setVal] = useState(step.options ? step.options[0] : "");
-
-  // Resetea el valor cuando cambia el paso
-  useEffect(() => {
-    setVal(step.options ? step.options[0] : "");
-  }, [step]);
 
   const handle = () => {
     if (val.trim()) onSubmit(val.trim());
