@@ -24,6 +24,12 @@ services:
         name: Permissions-Policy
         value: camera=(), microphone=(self), geolocation=(self)
       - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+      - path: /*
+        name: Cross-Origin-Resource-Policy
+        value: same-origin
+      - path: /*
         name: Content-Security-Policy
         value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://killerexpert10.tail29c8ce.ts.net; img-src 'self' data:; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
