@@ -35,7 +35,7 @@ class QdrantVectorStoreWrapper:
         if not self.url or not self.api_key:
             raise ValueError("QDRANT_URL y QDRANT_API_KEY son requeridas")
 
-        logger.info(f"Conectando a Qdrant: {self.url}")
+        logger.info("Conectando a Qdrant Cloud")
         self.client = QdrantClient(
             url=self.url,
             api_key=self.api_key,

@@ -61,7 +61,7 @@ export const useVoiceRecognition = ({
         formData.append("audio", blob, "recording.webm");
         formData.append("language", language);
 
-        // ✅ H-07 FIX: Usar cliente autenticado (Authorization Bearer + cookies).
+        // ✅ H-07 FIX: Usar cliente autenticado (cookie HttpOnly + withCredentials).
         const response = await api.post("/voice/transcribe", formData, {
           headers: {
             "Content-Type": "multipart/form-data",

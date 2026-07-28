@@ -13,11 +13,18 @@ dist-ssr
 *.local
 .env
 .env.local
+.env.*
+!.env.example
 .env.production
 .env.staging
 _pycache__
 chroma
 tests*
+
+# Runtime data
+transcriptions.json
+last_orders.db
+refresh_tokens.json
 
 # Base de datos local
 *.db

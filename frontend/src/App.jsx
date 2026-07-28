@@ -82,7 +82,7 @@ export default function App() {
 
   const handleLogin = (userData) => {
     /*
-     * ✅ M-01 FIX: El access token viaja en cookie HttpOnly.
+     * ✅ M-01 FIX: El access token viaja en cookie HttpOnly (nombre según ENV).
      * api/auth.js solo guarda datos básicos del usuario.
      */
     setUser(userData);

@@ -8,7 +8,8 @@
  * - cerrar sesión;
  * - guardar datos básicos del usuario en sessionStorage.
  *
- * ✅ M-01 FIX: El access token viaja en cookie HttpOnly, no en sessionStorage.
+ * ✅ M-01 FIX: El access token viaja en cookie HttpOnly (nombre según ENV),
+ * no en sessionStorage.
  */
 
 import {

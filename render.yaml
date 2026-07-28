@@ -1,18 +1,99 @@
 services:
+  - type: keyvalue
+    name: pizzeria220-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
   - type: web
-    name: backend
-    env: python
+    name: pizzeria220-api
+    runtime: python
     plan: free
 
     buildCommand: |
       python -m pip install --upgrade pip
       pip install -r requirements.txt
 
-    startCommand: uvicorn api2:app --host 0.0.0.0 --port $PORT
+    startCommand: >
+      uvicorn api2:app
+      --host 0.0.0.0
+      --port $PORT
+      --no-server-header
+      --no-date-header
 
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+
+      - key: ACCESS_TOKEN_MINUTES
+        value: "15"
+
+      - key: CHAT_MODEL_LOCAL
+        value: qwen2.5:7b
+
+      - key: CACHE_TTL
+        value: "300"
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pizzeria220-redis
+          property: connectionString
+
+      - key: ALLOWED_ORIGINS
+        value: https://rag-gente-de-ai.onrender.com
+
+      - key: CORS_ORIGINS
+        value: https://rag-gente-de-ai.onrender.com
+
+      - key: JWT_SECRET
+        sync: false
+
+      - key: REFRESH_TOKEN_SECRET
+        sync: false
+
+      - key: SUPABASE_URL
+        sync: false
+
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+      - key: AUTHORIZED_CHAT_ID
+        sync: false
+
+      - key: TELEGRAM_SERVICE_TOKEN
+        sync: false
+
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
+
+      - key: MERCADO_PAGO_PUBLIC_KEY
+        sync: false
+
+      - key: MERCADO_PAGO_WEBHOOK_SECRET
+        sync: false
+
+      - key: GROQ_API_KEY
+        sync: false
+
+      - key: QDRANT_URL
+        sync: false
+
+      - key: QDRANT_API_KEY
+        sync: false
+
+      - key: LOCATIONIQ_API_KEY
+        sync: false
+
+      - key: TRANSCRIPTION_ENCRYPTION_KEY
+        sync: false
+
   - type: web
     name: rag-gente-de-ai
     runtime: static
@@ -20,9 +101,11 @@ services:
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
+
     envVars:
       - key: VITE_API_URL
-        value: https://rag-gente-de-ai.onrender.com
+        value: https://killerexpert10.tail29c8ce.ts.net
+
     routes:
       - type: rewrite
         source: /*

@@ -3,7 +3,8 @@ const USER_KEY =
 
 /**
  * ✅ M-01 FIX: El access token ya no se almacena en sessionStorage.
- * Viaja en cookie HttpOnly __Host-access_token, no accesible por JS.
+ * Viaja en cookie HttpOnly (access_token en desarrollo,
+ * __Host-access_token en producción), no accesible por JS.
  * Solo guardamos datos básicos no sensibles del usuario.
  */
 export function saveSession({

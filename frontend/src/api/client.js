@@ -3,8 +3,8 @@
  *
  * Características:
  * - Axios centralizado;
- * - access token en Authorization Bearer;
- * - token guardado en sessionStorage;
+ * - access token en cookie HttpOnly (nombre depende de ENV: __Host-access_token en prod,
+ *   access_token en desarrollo);
  * - cookies HttpOnly habilitadas;
  * - renovación automática de sesión;
  * - cola de solicitudes durante refresh;
@@ -234,7 +234,8 @@ api.interceptors.request.use(
       config.headers || {};
 
     // ✅ M-01 FIX: No enviar Authorization Bearer desde sessionStorage.
-    // La autenticación viaja en cookie HttpOnly __Host-access_token.
+    // La autenticación viaja en cookie HttpOnly (access_token en dev,
+    // __Host-access_token en producción).
     delete config.headers.Authorization;
     delete config.headers.authorization;
 
@@ -416,7 +417,8 @@ api.interceptors.response.use(
           getStoredUser(),
       });
 
-      // ✅ M-01 FIX: No enviar Authorization Bearer; la cookie ya se actualizó.
+      // ✅ M-01 FIX: No enviar Authorization Bearer; la cookie ya se actualizó
+      // con el nombre correspondiente al entorno.
       processQueue(null);
 
       return api(

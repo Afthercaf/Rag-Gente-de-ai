@@ -20,11 +20,11 @@ USE_LOCAL = (
 
 CHAT_MODEL = CHAT_MODEL_LOCAL if USE_LOCAL else REMOTE_CHAT_MODEL
 EMBED_MODEL = EMBED_MODEL_LOCAL if USE_LOCAL else REMOTE_EMBED_MODEL
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://killerexpert10.tail29c8ce.ts.net:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 USE_HUGGINGFACE_EMBEDDINGS = os.getenv("USE_HUGGINGFACE_EMBEDDINGS", "False").lower() in {"1", "true", "yes", "on"}
 HF_EMBEDDING_MODEL = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-CACHE_TTL = 3600  # 1 hora
+CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))
 
 LOCAL_ORIGINS = [
     "http://localhost:5173",
@@ -34,9 +34,7 @@ LOCAL_ORIGINS = [
     "http://localhost:8080",
     "http://localhost:8000",
     "https://localhost:5173",
-    "https://localhost:5173",
     "https://rag-gente-de-ai.onrender.com",
-    "https://killerexpert10.tail29c8ce.ts.net"
 ]
 
 ALLOWED_ORIGINS = [
