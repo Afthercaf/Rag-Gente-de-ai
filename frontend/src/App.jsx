@@ -7,13 +7,13 @@ import ChatScreen from "./components/chat/ChatScreen";
 import { getCurrentUser } from "./api/auth";
 import {
   clearSession,
-  getAccessToken,
   getStoredUser,
+  hasSession,
 } from "./utils/session";
 
 export default function App() {
   const [screen, setScreen] = useState(() =>
-    getAccessToken() ? "loading" : "login"
+    hasSession() ? "loading" : "login"
   );
 
   const [user, setUser] = useState(() =>
@@ -21,9 +21,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    const token = getAccessToken();
-
-    if (!token) {
+    if (!hasSession()) {
       clearSession();
       setUser(null);
       setScreen("login");
@@ -46,7 +44,7 @@ export default function App() {
         });
 
         setScreen("chat");
-      } catch (error) {
+      } catch {
         if (!active) return;
 
         clearSession();
@@ -84,11 +82,8 @@ export default function App() {
 
   const handleLogin = (userData) => {
     /*
-     * LoginScreen/RegisterScreen ya llaman api/auth.js.
-     * Ese archivo guarda access_token y user.
-     *
-     * No vuelvas a llamar saveSession(userData) aquí,
-     * porque faltaría el token.
+     * ✅ M-01 FIX: El access token viaja en cookie HttpOnly.
+     * api/auth.js solo guarda datos básicos del usuario.
      */
     setUser(userData);
     setScreen("chat");

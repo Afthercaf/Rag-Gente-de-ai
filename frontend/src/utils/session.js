@@ -1,38 +1,14 @@
-const ACCESS_TOKEN_KEY =
-  "p220_access_token";
-
 const USER_KEY =
   "p220_user";
 
 /**
- * Guarda el access token y los datos básicos del usuario.
- *
- * sessionStorage:
- * - conserva la información al recargar;
- * - mantiene la sesión mientras la pestaña siga abierta;
- * - elimina la información al cerrar la pestaña;
- * - no comparte automáticamente la sesión con otras pestañas.
+ * ✅ M-01 FIX: El access token ya no se almacena en sessionStorage.
+ * Viaja en cookie HttpOnly __Host-access_token, no accesible por JS.
+ * Solo guardamos datos básicos no sensibles del usuario.
  */
 export function saveSession({
-  accessToken,
   user,
 }) {
-  const normalizedToken =
-    String(
-      accessToken || "",
-    ).trim();
-
-  if (!normalizedToken) {
-    throw new Error(
-      "El servidor no devolvió un token de acceso válido.",
-    );
-  }
-
-  sessionStorage.setItem(
-    ACCESS_TOKEN_KEY,
-    normalizedToken,
-  );
-
   sessionStorage.setItem(
     USER_KEY,
     JSON.stringify(
@@ -42,21 +18,15 @@ export function saveSession({
 }
 
 /**
- * Obtiene el access token almacenado.
+ * @deprecated El token se lee desde cookie HttpOnly en el backend.
+ * Mantenido para compatibilidad con código que no haya migrado.
  */
 export function getAccessToken() {
-  const token =
-    sessionStorage.getItem(
-      ACCESS_TOKEN_KEY,
-    );
-
-  return token
-    ? token.trim()
-    : null;
+  return null;
 }
 
 /**
- * Obtiene los datos del usuario almacenado.
+ * Obtiene los datos básicos del usuario almacenado.
  */
 export function getStoredUser() {
   const rawUser =
@@ -83,7 +53,7 @@ export function getStoredUser() {
  */
 export function hasSession() {
   return Boolean(
-    getAccessToken(),
+    getStoredUser(),
   );
 }
 
@@ -91,10 +61,6 @@ export function hasSession() {
  * Elimina completamente la sesión local.
  */
 export function clearSession() {
-  sessionStorage.removeItem(
-    ACCESS_TOKEN_KEY,
-  );
-
   sessionStorage.removeItem(
     USER_KEY,
   );

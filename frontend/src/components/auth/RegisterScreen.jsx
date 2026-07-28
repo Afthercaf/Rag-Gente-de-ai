@@ -122,9 +122,8 @@ export default function RegisterScreen({
       }
 
       /*
-       * El registro no debe guardar una sesión por sí solo si todavía
-       * no existe un access_token. Iniciamos sesión después del registro
-       * para obtener el JWT firmado y persistirlo mediante api/auth.js.
+       * ✅ M-01 FIX: El registro no debe guardar una sesión por sí solo.
+       * Iniciamos sesión después del registro para obtener la cookie HttpOnly.
        */
       const user = await login(gmail, password);
       onLogin(user);

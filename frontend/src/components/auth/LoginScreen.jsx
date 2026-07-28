@@ -34,8 +34,8 @@ export default function LoginScreen({
 
     try {
       /*
-       * api/auth.js guarda access_token + user y devuelve
-       * directamente el usuario autenticado.
+       * ✅ M-01 FIX: api/auth.js guarda datos básicos del usuario.
+       * El access token viaja en cookie HttpOnly.
        */
       const user = await login(
         gmail.trim(),

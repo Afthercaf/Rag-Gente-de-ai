@@ -6,7 +6,9 @@
  * - registrar usuarios;
  * - consultar el usuario actual;
  * - cerrar sesión;
- * - guardar el access token en sessionStorage.
+ * - guardar datos básicos del usuario en sessionStorage.
+ *
+ * ✅ M-01 FIX: El access token viaja en cookie HttpOnly, no en sessionStorage.
  */
 
 import {
@@ -22,7 +24,7 @@ import {
 } from "../utils/session";
 
 /**
- * Inicia sesión y guarda el access token.
+ * Inicia sesión y guarda los datos básicos del usuario.
  */
 export async function login(
   gmail,
@@ -58,37 +60,15 @@ export async function login(
       normalizedPassword,
     );
 
-  const accessToken =
-    data?.access_token ||
-    data?.token;
-
-  if (!accessToken) {
-    throw new Error(
-      "El servidor no devolvió un access token.",
-    );
-  }
-
+  // ✅ M-01 FIX: El access token se recibe en cookie HttpOnly.
   const user =
     data?.user || {
-      nombre:
-        data?.nombre || "",
-
-      gmail:
-        normalizedGmail,
-
-      telefono:
-        data?.telefono || "",
-
-      direccion:
-        data?.direccion || "",
-
       role:
         data?.role ||
         "cliente",
     };
 
   saveSession({
-    accessToken,
     user,
   });
 

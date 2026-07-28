@@ -16,7 +16,6 @@ import axios from "axios";
 
 import {
   clearSession,
-  getAccessToken,
   getStoredUser,
   saveSession,
 } from "../utils/session";
@@ -59,7 +58,6 @@ let failedQueue = [];
  */
 function processQueue(
   error,
-  token = null,
 ) {
   failedQueue.forEach(
     ({
@@ -69,7 +67,7 @@ function processQueue(
       if (error) {
         reject(error);
       } else {
-        resolve(token);
+        resolve();
       }
     },
   );
@@ -232,18 +230,25 @@ function normalizeError(
 
 api.interceptors.request.use(
   (config) => {
-    const token =
-      getAccessToken();
-
     config.headers =
       config.headers || {};
 
-    if (token) {
-      config.headers.Authorization =
-        `Bearer ${token}`;
-    } else {
-      delete config.headers
-        .Authorization;
+    // ✅ M-01 FIX: No enviar Authorization Bearer desde sessionStorage.
+    // La autenticación viaja en cookie HttpOnly __Host-access_token.
+    delete config.headers.Authorization;
+    delete config.headers.authorization;
+
+    // ✅ C-01 FIX: Señal anti-CSRF para métodos mutantes.
+    const method = (
+      config.method || ""
+    ).toUpperCase();
+    if (
+      ["POST", "PUT", "PATCH", "DELETE"].includes(
+        method,
+      )
+    ) {
+      config.headers["X-Requested-With"] =
+        "XMLHttpRequest";
     }
 
     /**
@@ -363,22 +368,8 @@ api.interceptors.response.use(
         },
       )
         .then(
-          (
-            newAccessToken,
-          ) => {
-            originalRequest.headers =
-              originalRequest.headers ||
-              {};
-
-            if (
-              newAccessToken
-            ) {
-              originalRequest
-                .headers
-                .Authorization =
-                `Bearer ${newAccessToken}`;
-            }
-
+          () => {
+            // ✅ M-01 FIX: Reintentar con la cookie HttpOnly recién rotada.
             return api(
               originalRequest,
             );
@@ -413,49 +404,20 @@ api.interceptors.response.use(
           {},
         );
 
-      const newAccessToken =
-        refreshResponse
-          ?.data
-          ?.access_token ||
-        refreshResponse
-          ?.data
-          ?.token;
-
-      if (
-        !newAccessToken
-      ) {
-        throw new Error(
-          "El servidor no devolvió un nuevo access token.",
-        );
-      }
-
       const refreshedUser =
         refreshResponse
           ?.data
           ?.user;
 
+      // ✅ M-01 FIX: No almacenar access token en JS.
       saveSession({
-        accessToken:
-          newAccessToken,
-
         user:
           refreshedUser ||
           getStoredUser(),
       });
 
-      originalRequest.headers =
-        originalRequest.headers ||
-        {};
-
-      originalRequest
-        .headers
-        .Authorization =
-        `Bearer ${newAccessToken}`;
-
-      processQueue(
-        null,
-        newAccessToken,
-      );
+      // ✅ M-01 FIX: No enviar Authorization Bearer; la cookie ya se actualizó.
+      processQueue(null);
 
       return api(
         originalRequest,
@@ -565,28 +527,14 @@ export async function refreshToken() {
         {},
       );
 
-    const newAccessToken =
-      response
-        ?.data
-        ?.access_token ||
-      response
-        ?.data
-        ?.token;
-
-    if (
-      newAccessToken
-    ) {
-      saveSession({
-        accessToken:
-          newAccessToken,
-
-        user:
-          response
-            ?.data
-            ?.user ||
-          getStoredUser(),
-      });
-    }
+    // ✅ M-01 FIX: El access token viaja en cookie HttpOnly.
+    saveSession({
+      user:
+        response
+          ?.data
+          ?.user ||
+        getStoredUser(),
+    });
 
     return response.data;
   } catch (error) {

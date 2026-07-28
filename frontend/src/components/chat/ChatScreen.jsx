@@ -1309,8 +1309,9 @@ ${
                 )}
 
                 {/* Botón de pago Mercado Pago */}
-                {msg.paymentUrl && (
+                {msg.paymentUrl && /^https:\/\//i.test(msg.paymentUrl) && (
                   <div className="p220-pay-wrap">
+                    {/* ✅ M-08 FIX: Solo renderizar URLs HTTPS externas verificadas. */}
                     <a
                       href={msg.paymentUrl}
                       target="_blank"

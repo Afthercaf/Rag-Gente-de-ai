@@ -3,8 +3,7 @@
 // Sin dependencia de Google Speech API — funciona en Brave, Firefox, cualquier navegador
 
 import { useState, useCallback, useRef } from "react";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "https://killerexpert10.tail29c8ce.ts.net";
+import api from "../api/client";
 
 export const useVoiceRecognition = ({
   onResult,
@@ -62,17 +61,19 @@ export const useVoiceRecognition = ({
         formData.append("audio", blob, "recording.webm");
         formData.append("language", language);
 
-        const response = await fetch(`${API_BASE}/voice/transcribe`, {
-          method: "POST",
-          body: formData,
+        // ✅ H-07 FIX: Usar cliente autenticado (Authorization Bearer + cookies).
+        const response = await api.post("/voice/transcribe", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
         });
 
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
+        if (response.status >= 400) {
+          const err = response.data || {};
           throw new Error(err.detail || `HTTP ${response.status}`);
         }
 
-        const data = await response.json();
+        const data = response.data;
 
         if (data.success && data.text?.trim()) {
           setTranscript(data.text.trim());

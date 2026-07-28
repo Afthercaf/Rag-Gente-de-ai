@@ -1,8 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-
-
-const API_BASE =
-  import.meta.env.VITE_API_URL;
+import api from "../api/client";
 
 const POLL_INTERVAL = 5000;
 
@@ -31,15 +28,9 @@ export function useOrderStatus(orderId) {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/order/${orderId}/status`
-        );
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const data = await res.json();
+        // ✅ H-07 FIX: Usar cliente autenticado en lugar de fetch crudo.
+        const res = await api.get(`/order/${orderId}/status`);
+        const data = res.data;
 
         const newStatus =
           data.status ||

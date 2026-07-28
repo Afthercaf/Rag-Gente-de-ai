@@ -292,20 +292,8 @@ export function placeOrder(
     payload,
   );
 
-  /*
-   * Log temporal de diagnóstico.
-   *
-   * Puedes eliminarlo después de resolver el 422.
-   * No contiene JWT ni contraseñas.
-   */
-  console.log(
-    "PAYLOAD /order:",
-    JSON.stringify(
-      payload,
-      null,
-      2,
-    ),
-  );
+  // ✅ M-02 FIX: No loggear PII en consola del navegador.
+  // Si se necesita diagnóstico, usar datos anonimizados en desarrollo.
 
   return createOrder(payload);
 }
