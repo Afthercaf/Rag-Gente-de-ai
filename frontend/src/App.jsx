@@ -22,6 +22,13 @@ export default function App() {
 
         if (!active) return;
 
+        if (!currentUser) {
+          clearSession();
+          setUser(null);
+          setScreen("login");
+          return;
+        }
+
         setUser(currentUser);
 
         setScreen("chat");

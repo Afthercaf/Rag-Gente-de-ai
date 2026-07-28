@@ -26,11 +26,11 @@ export default defineConfig(({ mode }) => {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "style-src-elem 'self'",
+    "style-src-elem 'self' https://fonts.googleapis.com",
     "style-src-attr 'unsafe-inline'",
     `connect-src ${connectSources.join(' ')}`,
     "img-src 'self' data:",
-    "font-src 'self'",
+    "font-src 'self' https://fonts.gstatic.com",
     "base-uri 'self'",
     "form-action 'self'",
   ].join('; ')
