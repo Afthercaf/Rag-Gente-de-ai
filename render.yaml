@@ -12,7 +12,7 @@ services:
 
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.11"
+        value: "3.12"
   - type: web
     name: rag-gente-de-ai
     runtime: static
@@ -22,7 +22,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://killerexpert10.tail29c8ce.ts.net
+        value: https://rag-gente-de-ai.onrender.com
     routes:
       - type: rewrite
         source: /*

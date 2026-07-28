@@ -14,10 +14,21 @@ dist-ssr
 .env
 .env.local
 .env.production
+.env.staging
 _pycache__
 chroma
 tests*
 
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos de transcripciones (contienen PII)
+transcriptions.json
+
+# Archivos de tokens (contienen refresh tokens)
+refresh_tokens.json
 
 # Editor directories and files
 .vscode/*
