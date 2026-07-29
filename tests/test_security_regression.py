@@ -26,6 +26,9 @@ El test evita imprimir tokens, contraseñas, claves o hashes completos.
 
 from __future__ import annotations
 
+# Escáner CLI parametrizado; pytest no debe recolectar sus funciones.
+__test__ = False
+
 import argparse
 import json
 import os

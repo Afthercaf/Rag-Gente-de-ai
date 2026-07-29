@@ -15,6 +15,7 @@ from src.supabase_orders import (
     update_order_status,
     update_payment_info,
     get_order_by_id,
+    get_order_by_id_and_owner,
 )
 from src.telegram_sender import send_telegram_order
 from services.mercadopago_service import mercadopago_service
@@ -80,7 +81,7 @@ async def place_order(
     direccion: str,
     pedido: str,
     payment_method: str,
-    total: Optional[str],
+    total: str,
     ubicacion: Optional[dict],
 ) -> Dict[str, Any]:
     """
@@ -88,13 +89,14 @@ async def place_order(
     """
     logger.info(f"📝 [place_order] Iniciando creación de orden")
     logger.info(f"   - user_id: {user_id}")
-    logger.info(f"   - cliente_nombre: {cliente_nombre}")
     logger.info(f"   - payment_method: '{payment_method}'")
-    logger.info(f"   - total: '{total}'")
+    # VULN-16/17/18: no registrar PII (nombre, email, dirección, teléfono).
     
     # Preparar datos
     ubicacion_json = json.dumps(ubicacion) if ubicacion else None
     sanitized_total = _sanitize_total(total)
+    if sanitized_total is None or sanitized_total <= 0:
+        raise ValueError("El total calculado por el servidor no es válido")
     logger.info(f"💰 Total sanitizado: {sanitized_total}")
 
     # Construir payload
@@ -141,8 +143,7 @@ async def place_order(
     if wants_card and payload["total"]:
         logger.info(f"💳 Generando link de Mercado Pago para orden {order_id}")
         logger.info(f"   - Monto: {payload['total']}")
-        logger.info(f"   - Email: {gmail}")
-        logger.info(f"   - Nombre: {cliente_nombre}")
+        # VULN-16/17/18: no registrar email ni nombre en logs.
         
         try:
             # Verificar que el servicio esté disponible
@@ -161,8 +162,9 @@ async def place_order(
                     description=f"Pedido {order_id} - Pizzería 220",
                     order_id=str(order_id),
                     title=f"Pedido {order_id} - Pizzería 220",
-                    email=gmail or "cliente@example.com",
-                    name=cliente_nombre or "Cliente",
+                    # VULN-03: evitar datos de ejemplo; usar datos reales de la orden.
+                    email=gmail,
+                    name=cliente_nombre,
                     expires_in_minutes=30,
                     user_id=user_id,
                 )
@@ -210,7 +212,7 @@ async def place_order(
             result["payment"] = {
                 "method": "mercadopago",
                 "success": False,
-                "error": str(e),
+                "error": "No se pudo generar el enlace de pago.",
             }
     else:
         logger.info(f"ℹ️ No se generará pago con Mercado Pago")
@@ -251,28 +253,57 @@ async def notify_telegram(
         logger.error(f"❌ Error enviando notificación Telegram para orden {order_id}: {e}")
 
 
-async def patch_status(order_id: str, status: str) -> Dict[str, Any]:
+async def patch_status(
+    order_id: str,
+    status: str,
+    owner_user_id: int | None = None,
+) -> Dict[str, Any]:
     """
     Actualiza el estado de una orden.
+
+    Si owner_user_id se proporciona, solo se actualiza si el pedido
+    pertenece a ese usuario (VULN-08/09).
     """
     logger.info(f"🔄 Actualizando pedido {order_id} -> {status}")
-    success = await asyncio.to_thread(update_order_status, order_id, status)
+    success = await asyncio.to_thread(
+        update_order_status, order_id, status, owner_user_id
+    )
     logger.info(f"📦 Resultado Supabase: {success}")
     return {"success": success, "order_id": order_id, "status": status}
 
 
-async def fetch_status(order_id: str) -> Dict[str, Any]:
+async def fetch_status(
+    order_id: str,
+    owner_user_id: int,
+) -> Dict[str, Any]:
     """
     Obtiene el estado de una orden.
+
+    owner_user_id es obligatorio para garantizar que solo el
+    dueño de la orden pueda consultar su estado (VULN-10).
     """
-    status = await asyncio.to_thread(get_order_status, order_id)
-    return {"order_id": order_id, "status": status}
+    order = await asyncio.to_thread(
+        get_order_by_id_and_owner, order_id, owner_user_id
+    )
+    if not order:
+        return {"order_id": order_id, "status": "no_encontrado"}
+    return {"order_id": order_id, "status": order.get("estado", "desconocido")}
 
 
-async def get_order_details(order_id: str) -> Optional[Dict[str, Any]]:
+async def get_order_details(
+    order_id: str,
+    owner_user_id: int | None = None,
+) -> Optional[Dict[str, Any]]:
     """
     Obtiene todos los detalles de una orden.
+
+    Si owner_user_id se proporciona, solo devuelve la orden si pertenece
+    a ese usuario (VULN-08/09).
     """
+    if owner_user_id is not None:
+        return await asyncio.to_thread(
+            get_order_by_id_and_owner, order_id, owner_user_id
+        )
     return await asyncio.to_thread(get_order_by_id, order_id)
 
 
@@ -320,7 +351,7 @@ async def update_payment_status_from_webhook(order_id: str, new_status: str) -> 
         return {
             "success": False,
             "order_id": order_id,
-            "error": str(e),
+            "error": "No se pudo actualizar el estado de pago.",
         }
 
 

@@ -1,17 +1,35 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 import uuid
-from collections import defaultdict, deque
-from typing import Deque
-
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from core.security import token_fingerprint
+from core.config import require_env
+from core.client_ip import get_client_ip
+from core.security import IS_PRODUCTION, token_fingerprint
+
+
+logger = logging.getLogger(__name__)
+
+
+def _redis_url() -> str:
+    """Construye la URL de Redis sin exponer la contraseña en un solo lugar.
+
+    VULN-04: Preferir variables separadas; REDIS_URL solo como override.
+    """
+    if os.getenv("REDIS_URL"):
+        return os.getenv("REDIS_URL")
+    host = os.getenv("REDIS_HOST", "redis")
+    port = int(os.getenv("REDIS_PORT", "6379"))
+    db = int(os.getenv("REDIS_DB", "0"))
+    password = require_env("REDIS_PASSWORD")
+    return f"redis://:{password}@{host}:{port}/{db}"
+
 
 
 MAX_JSON_BYTES = int(
@@ -28,12 +46,14 @@ MAX_AUDIO_BYTES = int(
     )
 )
 
+_allowed_origins_raw = os.getenv("ALLOWED_ORIGINS")
+if not _allowed_origins_raw:
+    raise RuntimeError(
+        "ALLOWED_ORIGINS debe estar configurada en el entorno."
+    )
 ALLOWED_ORIGINS = {
     origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "ALLOWED_ORIGINS",
-        "https://rag-gente-de-ai.onrender.com",
-    ).split(",")
+    for origin in _allowed_origins_raw.split(",")
     if origin.strip()
 }
 
@@ -48,12 +68,50 @@ PUBLIC_PATHS = {
     "/redoc",
     "/auth/login",
     "/auth/register",
+    "/auth/logout",
+    "/mp/callback",
 
     # Proxy de geocodificación y mapa.
-    "/maps/reverse",
-    "/maps/search",
-    "/maps/static",
 }
+
+
+# Patrones de rutas que nunca deben ser servidas por la aplicación.
+# Protegen contra fugas accidentales de archivos sensibles como .env
+_SENSITIVE_PATH_PATTERNS = {
+    ".env",
+    ".env.",
+    ".git",
+    ".gitignore",
+    ".dockerignore",
+    "config.json",
+    "secrets.json",
+    "id_rsa",
+    "id_ed25519",
+    "private.key",
+    "docker-compose.override.yml",
+}
+
+
+def _is_sensitive_path(path: str) -> bool:
+    """
+    Determina si una ruta intenta acceder a archivos sensibles.
+
+    Se usa para bloquear solicitudes como GET /.env, GET /.env.local,
+    GET /.git/config, etc., incluso si el servidor no las sirve
+    directamente.
+    """
+
+    lower_path = path.lower()
+
+    # Normalizar: asegurar que empiece con /.
+    if not lower_path.startswith("/"):
+        lower_path = f"/{lower_path}"
+
+    for pattern in _SENSITIVE_PATH_PATTERNS:
+        if pattern in lower_path:
+            return True
+
+    return False
 
 
 # Máximo de solicitudes y ventana en segundos.
@@ -82,21 +140,33 @@ _ALLOWED_JSON_TYPES = {
 }
 
 
-class InMemorySlidingWindow:
+class RedisSlidingWindow:
     """
-    Rate limiter para una sola instancia.
+    Rate limiter distribuido basado en Redis Sorted Sets.
 
-    En producción con múltiples instancias debe sustituirse
-    por Redis para compartir los contadores.
+    VULN-10: comparte contadores entre instancias para evitar bypass
+    del rate limit en despliegues con múltiples réplicas.
     """
 
-    def __init__(self) -> None:
-        self._events: dict[
-            str,
-            Deque[float],
-        ] = defaultdict(deque)
-
+    def __init__(self, redis_url: str) -> None:
+        self._redis_url = redis_url
+        self._redis = None
         self._lock = asyncio.Lock()
+
+    @property
+    def redis(self):
+        if self._redis is None:
+            import redis.asyncio as aioredis
+
+            self._redis = aioredis.from_url(
+                self._redis_url,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
+        return self._redis
 
     async def allow(
         self,
@@ -105,32 +175,43 @@ class InMemorySlidingWindow:
         maximum: int,
         window_seconds: int,
     ) -> tuple[bool, int]:
-        now = time.monotonic()
+        now = time.time()
         cutoff = now - window_seconds
 
-        async with self._lock:
-            events = self._events[key]
+        try:
+            r = self.redis
+            async with self._lock:
+                pipe = r.pipeline()
+                pipe.zremrangebyscore(key, "-inf", cutoff)
+                pipe.zcard(key)
+                pipe.zadd(key, {str(now): now})
+                pipe.expire(key, window_seconds)
+                _, current_count, _, _ = await pipe.execute()
 
-            while events and events[0] <= cutoff:
-                events.popleft()
-
-            if len(events) >= maximum:
-                retry_after = max(
-                    1,
-                    int(
-                        window_seconds
-                        - (now - events[0])
-                    ),
-                )
-
+            if current_count >= maximum:
+                # Calcular retry_after basado en el evento más antiguo.
+                oldest = await r.zrange(key, 0, 0, withscores=True)
+                if oldest:
+                    retry_after = max(
+                        1,
+                        int(window_seconds - (now - oldest[0][1])),
+                    )
+                else:
+                    retry_after = window_seconds
                 return False, retry_after
 
-            events.append(now)
-
+            return True, 0
+        except Exception as exc:
+            # En caso de fallo de Redis, no bloquear tráfico legítimo.
+            # Se registra la incidencia para monitoreo.
+            logger.warning(
+                "Redis rate limiter no disponible, permitiendo solicitud: %s",
+                exc,
+            )
             return True, 0
 
 
-_rate_limiter = InMemorySlidingWindow()
+_rate_limiter = RedisSlidingWindow(_redis_url())
 
 
 def _rule_for(
@@ -211,6 +292,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         method = request.method.upper()
+
+        # Bloquear explícitamente cualquier intento de acceso a
+        # archivos sensibles (.env, .git, claves privadas, etc.).
+        if _is_sensitive_path(path):
+            logger.warning(
+                "Intento de acceso a recurso sensible bloqueado | "
+                "path=%s | ip=%s | request_id=%s",
+                path,
+                get_client_ip(request),
+                request_id,
+            )
+            return _error_response(
+                status_code=404,
+                detail="Recurso no encontrado",
+                request_id=request_id,
+                headers={"Cache-Control": "no-store"},
+            )
 
         origin = request.headers.get("origin")
         normalized_origin = (
@@ -389,6 +487,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers[
             "Referrer-Policy"
         ] = "no-referrer"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
 
         response.headers[
             "Permissions-Policy"
@@ -413,12 +514,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             "no-store",
         )
 
-        response.headers[
-            "Strict-Transport-Security"
-        ] = (
-            "max-age=31536000; "
-            "includeSubDomains"
-        )
+        # VULN-26/27/28: HSTS solo en producción; X-XSS-Protection desactivado
+        # (los navegadores modernos usan CSP como defensa principal).
+        if IS_PRODUCTION:
+            response.headers[
+                "Strict-Transport-Security"
+            ] = (
+                "max-age=31536000; "
+                "includeSubDomains"
+            )
+
+        response.headers["X-XSS-Protection"] = "0"
 
         if (
             origin

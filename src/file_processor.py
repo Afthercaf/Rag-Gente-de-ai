@@ -1,9 +1,13 @@
 import pdfplumber
 import os
+import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
 DOCUMENTS_PATH = "documents"
+MAX_PDF_BYTES = 20 * 1024 * 1024
+MAX_PDF_PAGES = 200
+logger = logging.getLogger(__name__)
 
 def load_pdfs_with_pdfplumber(path: str) -> list[Document]:
     documents = []
@@ -13,9 +17,19 @@ def load_pdfs_with_pdfplumber(path: str) -> list[Document]:
             continue
 
         filepath = os.path.join(path, filename)
+        if os.path.getsize(filepath) > MAX_PDF_BYTES:
+            logger.warning("PDF omitido por tamaño excesivo")
+            continue
+        with open(filepath, "rb") as source:
+            if source.read(5) != b"%PDF-":
+                logger.warning("Archivo .pdf omitido por firma inválida")
+                continue
         full_text = ""
 
         with pdfplumber.open(filepath) as pdf:
+            if len(pdf.pages) > MAX_PDF_PAGES:
+                logger.warning("PDF omitido por exceso de páginas")
+                continue
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
@@ -26,16 +40,16 @@ def load_pdfs_with_pdfplumber(path: str) -> list[Document]:
                 page_content=full_text,
                 metadata={"source": filename}
             ))
-            print(f"✓ Cargado: {filename} ({len(full_text)} caracteres)")
+            logger.info("PDF cargado; caracteres=%d", len(full_text))
         else:
-            print(f"✗ Sin texto: {filename}")
+            logger.warning("PDF sin texto utilizable")
 
     return documents
 
 
 def chunk_pdfs() -> list[Document]:
     documents = load_pdfs_with_pdfplumber(DOCUMENTS_PATH)
-    print(f"PDFs cargados: {len(documents)}")
+    logger.info("PDFs cargados=%d", len(documents))
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,   # ← más grande para no cortar preguntas frecuentes
@@ -46,6 +60,6 @@ def chunk_pdfs() -> list[Document]:
     )
 
     chunks = splitter.split_documents(documents)
-    print(f"Chunks generados: {len(chunks)}")
+    logger.info("Chunks generados=%d", len(chunks))
 
     return chunks

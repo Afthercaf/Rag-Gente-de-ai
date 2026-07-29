@@ -1,15 +1,13 @@
 # test_rag.py
 import asyncio
-from services.rag_service import retrieve_context, get_pizza_names
 
-async def test():
-    # Probar búsqueda híbrida
-    context = await retrieve_context("¿Qué pizzas tienen?")
-    print(f"Contexto recuperado: {len(context)} caracteres")
-    print(context[:500])
-    
-    # Probar nombres de pizzas
+from services.rag_service import get_pizza_names, retrieve_context
+
+
+def test_rag_retrieval_contract():
+    context = asyncio.run(retrieve_context("¿Qué pizzas tienen?"))
     pizzas = get_pizza_names()
-    print(f"Pizzas encontradas: {pizzas}")
 
-asyncio.run(test())
+    assert isinstance(context, str)
+    assert isinstance(pizzas, list)
+    assert all(isinstance(pizza, str) for pizza in pizzas)

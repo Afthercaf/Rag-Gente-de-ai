@@ -1,9 +1,11 @@
 import time
 import threading
+import logging
 from typing import Any, Dict
 
 from services.provider_service import provider_service
 
+logger = logging.getLogger(__name__)
 
 class LazyModelLoader:
     """Carga el modelo LLM solo cuando se necesita (lazy loading)."""
@@ -17,10 +19,13 @@ class LazyModelLoader:
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    print("🔄 Cargando modelo LLM bajo demanda...")
+                    logger.info("Cargando modelo LLM bajo demanda.")
                     start = time.time()
                     self._model = provider_service.llm_provider
-                    print(f"✅ Proveedor LLM listo en {time.time() - start:.2f}s")
+                    logger.info(
+                        "Proveedor LLM listo en %.2fs",
+                        time.time() - start,
+                    )
         return self._model
 
 

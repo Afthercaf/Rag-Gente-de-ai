@@ -2,12 +2,11 @@ import logging
 import os
 from typing import Any
 
-from dotenv import load_dotenv
+import core.config  # Carga centralizada del entorno.
+from core.config import require_env
 
 from config.models import CHAT_MODEL
 from providers.base_provider import BaseProvider
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,7 @@ class GroqProvider(BaseProvider):
 
     def __init__(self, model_name: str | None = None) -> None:
         self.model_name = model_name or os.getenv("CHAT_MODEL", CHAT_MODEL)
-        self.api_key = os.getenv("GROQ_API_KEY")
+        self.api_key = require_env("GROQ_API_KEY")
         self._model = None
 
     def get_model(self):

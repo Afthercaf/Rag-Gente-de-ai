@@ -2,28 +2,55 @@ import logging
 import os
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
-from dotenv import load_dotenv
+import core.config  # Carga centralizada del entorno.
+from core.config import require_env
 import httpx
 from langchain_ollama import ChatOllama
 
 from config.models_local import CHAT_MODEL_LOCAL
 from providers.base_provider import BaseProvider
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-DEFAULT_OLLAMA_URL = "http://killerexpert10.tail29c8ce.ts.net:11434"
 DEFAULT_RETRY_COUNT = 3
 RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _validated_ollama_url(raw_url: str) -> str:
+    """Valida el destino Ollama con una allowlist de egress tipo CORS."""
+    parsed = urlsplit(raw_url.strip())
+    allowed_hosts = {
+        host.strip().lower()
+        for host in require_env("OLLAMA_ALLOWED_HOSTS").split(",")
+        if host.strip()
+    }
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.hostname.lower() not in allowed_hosts
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise RuntimeError(
+            "OLLAMA_BASE_URL no pertenece a un host Ollama permitido."
+        )
+    if parsed.port not in {None, 443, 11434}:
+        raise RuntimeError("El puerto de OLLAMA_BASE_URL no está permitido.")
+    return raw_url.strip().rstrip("/")
 
 
 class OllamaProvider(BaseProvider):
     """Proveedor local basado en Ollama REST. """
 
     def __init__(self, model_name: str | None = None, base_url: str | None = None) -> None:
-        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL)).rstrip("/")
+        self.base_url = _validated_ollama_url(
+            base_url or require_env("OLLAMA_BASE_URL")
+        )
         self.model_name = model_name or os.getenv("CHAT_MODEL_LOCAL", CHAT_MODEL_LOCAL)
         self._model: ChatOllama | None = None
 
@@ -46,7 +73,11 @@ class OllamaProvider(BaseProvider):
         return self._model
 
     def _http_client(self) -> httpx.Client:
-        return httpx.Client(timeout=10.0)
+        return httpx.Client(
+            timeout=10.0,
+            follow_redirects=False,
+            trust_env=False,
+        )
 
     def _check_tags_endpoint(self) -> bool:
         try:

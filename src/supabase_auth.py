@@ -4,18 +4,11 @@ import os
 from typing import Any, Optional
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
+from core.config import require_env, supabase_server_key
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL:
-    raise ValueError("SUPABASE_URL no definida")
-if not SUPABASE_KEY:
-    raise ValueError("SUPABASE_KEY no definida")
+SUPABASE_URL = require_env("SUPABASE_URL")
+SUPABASE_KEY = supabase_server_key()
 
 BASE_HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -72,6 +65,27 @@ def get_user_by_gmail(gmail: str) -> Optional[dict[str, Any]]:
         return data[0] if data else None
     except (requests.RequestException, ValueError, TypeError):
         logger.exception("Error obteniendo usuario")
+        return None
+
+def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
+    try:
+        response = requests.get(
+            USERS_ENDPOINT,
+            headers=BASE_HEADERS,
+            params={
+                "id": f"eq.{int(user_id)}",
+                "select": "id,public_id,nombre,telefono,gmail,direccion,role,created_at",
+                "limit": "1",
+            },
+            timeout=TIMEOUT,
+        )
+        _safe_log("GET_USER_BY_ID", response)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        return data[0] if data else None
+    except (requests.RequestException, ValueError, TypeError):
+        logger.exception("Error obteniendo perfil de usuario")
         return None
 
 def update_user_password_hash(user_id: int, password_hash: str) -> bool:

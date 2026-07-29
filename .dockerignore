@@ -22,18 +22,32 @@ pytest_cache/
 
 # Database
 chroma_db/
-
-# No excluir *.db ni documents/ ni transcriptions.json - se necesitan en runtime
+*.db
+*.sqlite
+*.sqlite3
 
 # Environment & secrets
 .env
 .env.*
-!.env.example
 env.key
 .env.enc
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+secrets/
+secret/
+credentials*.json
+*token*.json
 refresh_tokens.json
 transcriptions.json
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+tests/
+.coverage
+security-results.xml
+PENTEST*.md
+reports-production/

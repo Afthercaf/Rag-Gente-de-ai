@@ -63,9 +63,9 @@ def handle_payment_in_chat(
     order_id: str,
     amount: float,
     description: str,
+    user_email: str,
+    user_name: str,
     method: str = "mercadopago",
-    user_email: str = None,
-    user_name: str = None,
 ) -> Dict[str, Any]:
     """
     Procesa un pago desde el chat de forma dinámica
@@ -89,8 +89,8 @@ def handle_payment_in_chat(
             amount=amount,
             description=description,
             order_id=order_id,
-            user_email=user_email or "cliente@example.com",
-            user_name=user_name or "Cliente",
+            user_email=user_email,
+            user_name=user_name,
         )
 
         if payment.success:

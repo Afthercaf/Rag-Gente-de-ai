@@ -1,19 +1,38 @@
 import os
+import logging
+from decimal import Decimal, InvalidOperation
 import requests
 import time
-from dotenv import load_dotenv
+from core.config import require_env, supabase_server_key
 from langchain_core.documents import Document
 
-load_dotenv()
+SUPABASE_URL = require_env("SUPABASE_URL")
+SUPABASE_KEY = supabase_server_key()
+logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+def _safe_text(value: object, *, max_length: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > max_length:
+        raise ValueError("Campo de promoción demasiado largo.")
+    lowered = text.lower()
+    forbidden = (
+        "ignore previous",
+        "ignora las instrucciones",
+        "system prompt",
+        "developer message",
+        "actúa como",
+        "jailbreak",
+    )
+    if any(marker in lowered for marker in forbidden):
+        raise ValueError("Contenido de promoción no confiable.")
+    return text
 
 def load_promotions() -> list[Document]:
     """Carga promociones con timeout alto y reintentos"""
     
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("⚠️ Supabase no configurado")
+        logger.warning("Supabase no configurado.")
         return []
     
     url = f"{SUPABASE_URL}/rest/v1/promociones?activa=eq.true"
@@ -26,7 +45,7 @@ def load_promotions() -> list[Document]:
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            print(f"🔄 Cargando promociones (intento {attempt + 1})...")
+            logger.info("Cargando promociones; intento=%s", attempt + 1)
             
             # Timeout de 30 segundos para conexión lenta
             response = requests.get(
@@ -40,21 +59,38 @@ def load_promotions() -> list[Document]:
                 docs = []
                 
                 for promo in data:
+                    try:
+                        nombre = _safe_text(promo.get("nombre"), max_length=120)
+                        descripcion = _safe_text(
+                            promo.get("descripcion"), max_length=500
+                        )
+                        ingredientes = _safe_text(
+                            promo.get("ingredientes"), max_length=500
+                        )
+                        refresco = _safe_text(
+                            promo.get("refresco"), max_length=120
+                        )
+                        precio = Decimal(str(promo.get("precio")))
+                        if not Decimal("0") < precio <= Decimal("100000"):
+                            raise ValueError("Precio fuera de rango.")
+                    except (InvalidOperation, TypeError, ValueError):
+                        logger.warning("Promoción inválida omitida.")
+                        continue
                     content = f"""
 PROMOCION:
-{promo['nombre']}
+{nombre}
 
 DESCRIPCION:
-{promo['descripcion']}
+{descripcion}
 
 INGREDIENTES:
-{promo['ingredientes']}
+{ingredientes}
 
 REFRESCO:
-{promo['refresco']}
+{refresco}
 
 PRECIO:
-{promo['precio']}
+{precio}
 """
                     docs.append(
                         Document(
@@ -66,21 +102,21 @@ PRECIO:
                         )
                     )
                 
-                print(f"✅ Promociones cargadas: {len(docs)}")
+                logger.info("Promociones válidas cargadas: %s", len(docs))
                 return docs
                 
             else:
-                print(f"❌ Error {response.status_code}: {response.text[:100]}")
+                logger.warning("Supabase promociones respondió status=%s", response.status_code)
                 
         except requests.exceptions.Timeout:
-            print(f"⚠️ Timeout (intento {attempt + 1})")
+            logger.warning("Timeout cargando promociones; intento=%s", attempt + 1)
             if attempt < max_retries - 1:
                 time.sleep(3)
                 
-        except Exception as e:
-            print(f"❌ Error: {e}")
+        except Exception:
+            logger.exception("Error cargando promociones.")
             if attempt < max_retries - 1:
                 time.sleep(3)
     
-    print("⚠️ Usando lista vacía de promociones")
+    logger.warning("Usando lista vacía de promociones.")
     return []

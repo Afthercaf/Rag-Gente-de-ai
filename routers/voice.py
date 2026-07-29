@@ -8,13 +8,22 @@ from fastapi.responses import JSONResponse
 import tempfile
 import os
 import json
+import subprocess
+import logging
+import re
 from datetime import datetime
 from typing import Optional
 import uuid
 
 from core.security import CurrentUser, get_current_user, require_roles
+from core.transcription_store import (
+    decrypt_transcription,
+    encrypt_transcription,
+)
 
 router = APIRouter(prefix="/voice", tags=["voice"])
+logger = logging.getLogger(__name__)
+ALLOWED_LANGUAGES = {"es", "es-MX", "en", "en-US"}
 
 # ── Configuración ────────────────────────────────────────────────
 TRANSCRIPTIONS_FILE = "transcriptions.json"
@@ -31,28 +40,45 @@ def get_model():
     global _model
     if _model is None:
         from faster_whisper import WhisperModel
-        print("🔊 Cargando modelo Whisper 'base'...")
+        logger.info("Cargando modelo de transcripción")
         _model = WhisperModel("base", device="cpu", compute_type="int8")
-        print("✅ Modelo Whisper listo")
+        logger.info("Modelo de transcripción listo")
     return _model
 
 
 # ── Funciones para manejar transcripciones ──────────────────────
-def load_transcriptions() -> list:
-    """Carga el historial de transcripciones desde el archivo JSON"""
+def _load_raw_entries() -> list[dict]:
+    """Carga las entradas crudas (posiblemente cifradas) del archivo JSON."""
     if os.path.exists(TRANSCRIPTIONS_FILE):
         try:
             with open(TRANSCRIPTIONS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
         except (json.JSONDecodeError, IOError):
             return []
     return []
 
+
+def load_transcriptions() -> list[dict]:
+    """Carga y descifra el historial de transcripciones."""
+    raw_entries = _load_raw_entries()
+    transcriptions: list[dict] = []
+    for entry in raw_entries:
+        encrypted = entry.get("encrypted")
+        if not encrypted:
+            # Compatibilidad: entrada en texto plano antigua (no debería existir).
+            continue
+        decrypted = decrypt_transcription(encrypted)
+        if decrypted is not None:
+            transcriptions.append(decrypted)
+    return transcriptions
+
+
 def save_transcription(text: str, language: str, user_id: str):
-    """Guarda una transcripción en el archivo JSON"""
-    transcriptions = load_transcriptions()
-    
-    # Crear entrada
+    """Cifra y guarda una transcripción en el archivo JSON."""
+    transcriptions = _load_raw_entries()
+
     entry = {
         "id": str(uuid.uuid4()),
         "text": text,
@@ -61,26 +87,29 @@ def save_transcription(text: str, language: str, user_id: str):
         "timestamp": datetime.now().isoformat(),
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    
+
+    encrypted_entry = {"encrypted": encrypt_transcription(entry)}
+
     # Agregar al inicio (más reciente primero)
-    transcriptions.insert(0, entry)
-    
+    transcriptions.insert(0, encrypted_entry)
+
     # Limitar historial
     if len(transcriptions) > MAX_HISTORY:
         transcriptions = transcriptions[:MAX_HISTORY]
-    
+
     # Guardar archivo
     try:
         with open(TRANSCRIPTIONS_FILE, 'w', encoding='utf-8') as f:
             json.dump(transcriptions, f, ensure_ascii=False, indent=2)
-        print(f"💾 Transcripción guardada: '{text[:50]}...'")
+        logger.info("Transcripción cifrada guardada")
         return True
     except Exception as e:
-        print(f"❌ Error al guardar transcripción: {e}")
+        logger.exception("No fue posible guardar la transcripción cifrada")
         return False
 
-def get_transcriptions(limit: int = 10) -> list:
-    """Obtiene las últimas transcripciones guardadas"""
+
+def get_transcriptions(limit: int = 10) -> list[dict]:
+    """Obtiene las últimas transcripciones descifradas."""
     transcriptions = load_transcriptions()
     return transcriptions[:limit]
 
@@ -93,12 +122,14 @@ async def transcribe_audio(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     audio_bytes = await audio.read()
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(status_code=422, detail="Idioma no válido")
+    filename = os.path.basename(audio.filename or "")
+    if not filename or len(filename) > 255:
+        raise HTTPException(status_code=422, detail="Nombre de archivo no válido")
 
-    print(f"📦 content_type: {audio.content_type}")
-    print(f"📦 filename: {audio.filename}")
-    print(f"📦 tamaño: {len(audio_bytes)} bytes")
-    print(f"📦 language: {language}")
-    print(f"📦 user_uuid: {current_user.public_id}")
+    logger.info("Audio recibido: tipo=%s bytes=%d idioma=%s",
+                audio.content_type, len(audio_bytes), language)
 
     allowed_audio_types = {
         "audio/webm",
@@ -156,14 +187,29 @@ async def transcribe_audio(
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
-        print(f"💾 Audio temporal: {tmp_path}")
 
         # Convertir a WAV 16kHz mono con ffmpeg para garantizar compatibilidad
         wav_path = tmp_path.replace(suffix, ".wav")
-        ret = os.system(
-            f'ffmpeg -y -i "{tmp_path}" -ar 16000 -ac 1 "{wav_path}" -loglevel error'
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                tmp_path,
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                wav_path,
+                "-loglevel",
+                "error",
+            ],
+            capture_output=True,
+            text=True,
         )
-        print(f"🔄 Conversión ffmpeg: código {ret}, wav existe: {os.path.exists(wav_path)}")
+        ret = result.returncode
+        if ret != 0:
+            logger.warning("ffmpeg rechazó el audio; código=%d", ret)
 
         # Usar WAV si la conversión fue exitosa, si no intentar con el original
         input_path = wav_path if (ret == 0 and os.path.exists(wav_path)) else tmp_path
@@ -178,7 +224,8 @@ async def transcribe_audio(
         )
 
         text = " ".join(seg.text.strip() for seg in segments).strip()
-        print(f"🎤 Transcripción: '{text}' (idioma detectado: {info.language})")
+        # VULN-16/17/18: no registrar el contenido de la transcripción.
+        logger.info("Transcripción completada; idioma=%s", info.language)
 
         if not text:
             error = "No se detectó voz"
@@ -200,9 +247,11 @@ async def transcribe_audio(
         })
 
     except Exception as e:
-        print(f"❌ Error en transcripción: {e}")
-        error_msg = f"Error al transcribir: {str(e)}"
-        raise HTTPException(status_code=500, detail=error_msg)
+        logger.exception("Error interno transcribiendo audio")
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible transcribir el audio",
+        ) from e
 
     finally:
         # Limpiar archivos temporales
@@ -211,7 +260,7 @@ async def transcribe_audio(
                 try:
                     os.unlink(p)
                 except Exception as e:
-                    print(f"⚠️ Error al eliminar archivo temporal {p}: {e}")
+                    logger.warning("No fue posible eliminar un archivo temporal")
 
 
 # ── Endpoints para gestionar transcripciones guardadas ──────────
@@ -236,9 +285,9 @@ async def get_transcription_history(
             "transcriptions": transcriptions[:limit]
         })
     except Exception as e:
-        print(f"❌ Error al obtener historial: {e}")
+        logger.exception("Error obteniendo historial de transcripciones")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "No fue posible procesar el audio."},
             status_code=500
         )
 
@@ -249,30 +298,42 @@ async def delete_transcription(
 ):
     """Elimina una transcripción específica"""
     try:
-        transcriptions = load_transcriptions()
-        original_count = len(transcriptions)
-        
-        # Filtrar por id
-        transcriptions = [t for t in transcriptions if t.get('id') != transcription_id]
-        
-        if len(transcriptions) == original_count:
+        raw_entries = _load_raw_entries()
+        kept: list[dict] = []
+        found = False
+
+        for entry in raw_entries:
+            encrypted = entry.get("encrypted")
+            if not encrypted:
+                continue
+            decrypted = decrypt_transcription(encrypted)
+            if decrypted is None:
+                continue
+            if (
+                decrypted.get("id") == transcription_id
+                and decrypted.get("user_id") == str(current_user.public_id)
+            ):
+                found = True
+                continue
+            kept.append(entry)
+
+        if not found:
             return JSONResponse(
                 content={"success": False, "error": "Transcripción no encontrada"},
                 status_code=404
             )
-        
-        # Guardar cambios
+
         with open(TRANSCRIPTIONS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(transcriptions, f, ensure_ascii=False, indent=2)
-        
+            json.dump(kept, f, ensure_ascii=False, indent=2)
+
         return JSONResponse(content={
             "success": True,
             "message": f"Transcripción #{transcription_id} eliminada"
         })
     except Exception as e:
-        print(f"❌ Error al eliminar transcripción: {e}")
+        logger.exception("Error eliminando transcripción")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "No fue posible procesar el audio."},
             status_code=500
         )
 
@@ -282,11 +343,19 @@ async def clear_transcription_history(
 ):
     """Elimina todo el historial de transcripciones"""
     try:
-        transcriptions = load_transcriptions()
-        remaining = [
-            t for t in transcriptions
-            if t.get("user_id") != str(current_user.public_id)
-        ]
+        raw_entries = _load_raw_entries()
+        remaining: list[dict] = []
+
+        for entry in raw_entries:
+            encrypted = entry.get("encrypted")
+            if not encrypted:
+                continue
+            decrypted = decrypt_transcription(encrypted)
+            if decrypted is None:
+                continue
+            if decrypted.get("user_id") != str(current_user.public_id):
+                remaining.append(entry)
+
         with open(TRANSCRIPTIONS_FILE, "w", encoding="utf-8") as f:
             json.dump(remaining, f, ensure_ascii=False, indent=2)
         return JSONResponse(content={
@@ -294,9 +363,9 @@ async def clear_transcription_history(
             "message": "Historial eliminado completamente"
         })
     except Exception as e:
-        print(f"❌ Error al limpiar historial: {e}")
+        logger.exception("Error limpiando historial de transcripciones")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "No fue posible consultar la transcripción."},
             status_code=500
         )
 
@@ -351,8 +420,8 @@ async def get_transcription_stats(
             "average_length": round(avg_length, 1)
         })
     except Exception as e:
-        print(f"❌ Error al obtener estadísticas: {e}")
+        logger.exception("Error calculando estadísticas de transcripción")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "No fue posible eliminar la transcripción."},
             status_code=500
         )

@@ -11,7 +11,10 @@ FLUJO DE UN SOLO PASO (eliminado el paso de "quitar ingredientes"):
 
 import re
 import unicodedata
+import logging
 from typing import Optional, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 MENU_KEYWORDS = {
     "menu", "menú", "carta", "opciones", "qué tienen",
@@ -48,6 +51,12 @@ INJECTION_PATTERNS = (
     r"\b(?:cuanto es|cuánto es|resuelve|calcula)\b.*\b(?:\d+\s*[+\-*/×÷]\s*\d+|raiz|raíz|potencia|logaritmo|seno|coseno|integral|derivada)\b",
     r"\b(?:escribe|crea|genera|haz un)\b.*\b(?:programa|código|codigo|script|función|funcion|clase|algoritmo)\b.*\b(?:php|python|java|javascript|html|css|sql|rust|go|ruby|c\+\+|c#)\b",
     r"\b(?:hola mundo|hello world|print\s*\(|console\.log)\b",
+    r"\b(?:ignore|forget|disregard|override|bypass)\b.*\b(?:previous|prior|system|developer|instructions?|rules?|prompt)\b",
+    r"\b(?:jailbreak|do anything now|developer mode|modo desarrollador|dan)\b",
+    r"\b(?:pretend|roleplay|simula|finge|interpreta)\b.*\b(?:admin|system|developer|sin reglas|unrestricted)\b",
+    r"\b(?:repeat|quote|dump|show|reveal|extract)\b.*\b(?:system|developer|hidden|internal)\b.*\b(?:prompt|message|instructions?)\b",
+    r"\b(?:traduce|translate|encode|decodifica|decode)\b.*\b(?:prompt|instrucciones|system message|developer message)\b",
+    r"\b(?:usuario|user)\s*:\s*.*\b(?:sistema|system|assistant|developer)\s*:",
 )
 PIZZA_GENERIC_PATTERN = re.compile(
     r"\bpizzas?\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})\b", re.IGNORECASE,
@@ -76,7 +85,20 @@ LITERAL_RESPONSE_PREFIX = "::LITERAL_RESPONSE::"
 
 
 def _normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKC", str(text))
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]", "", text)
+    text = text.translate(str.maketrans({
+        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c",
+        "х": "x", "і": "i", "ј": "j",
+    }))
     text = text.lower().strip()
+    # Une evasiones sencillas por separación de caracteres:
+    # "i g n o r a" -> "ignora".
+    text = re.sub(
+        r"(?<!\w)(?:[a-záéíóúñ]\s+){3,}[a-záéíóúñ](?!\w)",
+        lambda match: re.sub(r"\s+", "", match.group(0)),
+        text,
+    )
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
@@ -634,11 +656,8 @@ def _extract_observations(extra_answer: str, extras_context: str) -> str:
     return ""
 
 def _compute_total(pizza: str, extras_answer: str, extras_context: str, context: str) -> str:
-    print(f"  [DEBUG _compute_total] pizza={pizza}, extras_answer='{extras_answer}'")
-    print(f"  [DEBUG _compute_total] context length={len(context)}, first 100 chars: {context[:100]}")
     
     pizza_price = _extract_price_near(context, pizza)
-    print(f"  [DEBUG _compute_total] pizza_price={pizza_price}")
     
     if pizza_price is None:
         try:
@@ -647,9 +666,8 @@ def _compute_total(pizza: str, extras_answer: str, extras_context: str, context:
             docs = state["db"].similarity_search(pizza, k=TOP_K)
             pizza_context = "\n".join(doc.page_content for doc in docs)
             pizza_price = _extract_price_near(pizza_context, pizza)
-            print(f"  [DEBUG _compute_total] pizza_price from DB={pizza_price}")
         except Exception as exc:
-            print(f"  [DEBUG _compute_total] DB search failed: {exc}")
+            logger.debug("No fue posible consultar precio alternativo")
 
     # Calcular extras
     if is_no_in_order_flow(extras_answer):
@@ -657,13 +675,11 @@ def _compute_total(pizza: str, extras_answer: str, extras_context: str, context:
     else:
         extras_total, extras_found = _sum_requested_extras(extras_answer, extras_context)
         extras_resolved = bool(extras_found) or is_no_in_order_flow(extras_answer)
-        print(f"  [DEBUG _compute_total] extras_total={extras_total}, extras_found={extras_found}")
 
     # Calcular bebidas del mensaje del cliente
     beverage_total = 0.0
     beverage_pattern = re.compile(r"\b(coca[-\s]?cola|refresco|bebida)\b", re.IGNORECASE)
     beverage_match = beverage_pattern.search(extras_answer)
-    print(f"  [DEBUG _compute_total] beverage_match={beverage_match}")
     
     if beverage_match:
         # Buscar precio de bebida en el contexto (no usa _extract_price_near porque busca "pizza <nombre>")
@@ -674,15 +690,12 @@ def _compute_total(pizza: str, extras_answer: str, extras_context: str, context:
                 m = _PRICE_PATTERN.search(line)
                 if m:
                     beverage_price = float(m.group(1).replace(",", "."))
-                    print(f"  [DEBUG _compute_total] Found beverage price: {beverage_price} in line: {line}")
                     break
         if beverage_price is None:
             beverage_price = 45.0  # Precio estándar del menú si no se encuentra
-            print(f"  [DEBUG _compute_total] Using default beverage price: {beverage_price}")
         beverage_total = beverage_price
 
     total = pizza_price + extras_total + beverage_total if pizza_price is not None else None
-    print(f"  [DEBUG _compute_total] final total={total}")
     
     if total is not None:
         return f"${total:.2f}"
@@ -812,9 +825,7 @@ def build_directive(
     question: str, pizza_names: list[str], history: list[dict],
     extras_context: str, context: str = "", promos_text: str = "",
 ) -> str:
-    print(f"\n🚀 [LOG TERMINAL] --- NUEVA EVALUACIÓN DE DIRECTIVA ---")
-    print(f"📥 Input Usuario (question): '{question}'")
-    print(f"🗂️ Mensajes en Historial: {len(history)} turnos")
+    logger.debug("Evaluando directiva; turnos=%d", len(history))
 
     # BARRERAS DE SEGURIDAD
     if is_prompt_injection(question):
@@ -1713,6 +1724,8 @@ def _cart_summary(cart: dict) -> str:
         quantity = int(group["quantity"])
         pizza_subtotal = quantity * float(group["base_price"])
 
+        if len(grouped) == 1:
+            lines.append(f"Producto: Pizza {group['pizza']}")
         lines.append(
             f"• {quantity} × Pizza {group['pizza']} — ${pizza_subtotal:.2f}"
         )
@@ -1917,6 +1930,10 @@ def _start_cart_response(cart: dict, extras_context: str) -> str:
     for item in items:
         counts[item["pizza"]] = counts.get(item["pizza"], 0) + 1
     base.extend(f"• {qty} × Pizza {name}" for name, qty in counts.items())
+    base.extend([
+        f"Cantidad: {len(items)}",
+        f"Total: ${_cart_total(cart):.2f} MXN",
+    ])
 
     cart["status"] = "asking_any_extras"
 
@@ -2317,6 +2334,36 @@ def build_directive(
     )
     n = _normalize(question)
 
+    if cart is None and history:
+        last_assistant = _normalize(str(history[-1].get("assistant") or ""))
+        if "agregar alguno" in last_assistant or "extras disponibles" in last_assistant:
+            original_request = next(
+                (str(turn.get("user") or "") for turn in history if turn.get("user")),
+                "",
+            )
+            recovered_items, _ = _extract_cart_items(
+                original_request, pizza_names, context
+            )
+            if recovered_items:
+                cart = {
+                    "user_id": user_id,
+                    "status": "asking_any_extras",
+                    "cursor": 0,
+                    "items": recovered_items,
+                    "observations": [],
+                }
+
+    if (
+        n in {"no", "ninguna", "ninguno", "nada"}
+        and history
+        and "menu completo" in _normalize(str(history[-1].get("assistant") or ""))
+    ):
+        return (
+            LITERAL_RESPONSE_PREFIX
+            + context
+            + "\n\n¿Cuál te llama la atención? 🍕"
+        )
+
     # Amenazas de privilegios y extracción de datos también son inyección.
     if re.search(r"\b(?:nivel admin|soy admin|administrador|datos registrados|datos de usuarios|base de datos|tablas|schema|credenciales)\b", n):
         return LITERAL_RESPONSE_PREFIX + "No puedo revelar datos internos, credenciales ni información de usuarios. Puedo ayudarte con el menú o un pedido."
@@ -2515,7 +2562,11 @@ def build_directive(
     # 7. Menú completo, incluidas promociones informativas.
     if has_menu_intent(question):
         from services.menu_formatter import MenuFormatter
-        return LITERAL_RESPONSE_PREFIX + (MenuFormatter().format() or "El menú no está disponible temporalmente.")
+        return LITERAL_RESPONSE_PREFIX + (
+            MenuFormatter().format()
+            or context
+            or "El menú no está disponible temporalmente."
+        )
 
     # 7. Preguntas de precio, sin crear pedido.
     quote = _build_price_quote(question, pizza_names, context, extras_context)
@@ -2590,11 +2641,13 @@ def build_directive(
         return LITERAL_RESPONSE_PREFIX + error
     if items:
         if cart is None:
-            # Compatibilidad sin sesión: se pregunta, pero no se finge persistencia.
-            return LITERAL_RESPONSE_PREFIX + (
-                "Identifiqué el pedido, pero la sesión no proporcionó un carrito aislado. "
-                "Actualiza chat.py para pasar current_cart y evitar pérdida o mezcla de estado."
-            )
+            cart = {
+                "user_id": user_id,
+                "status": "collecting_extras",
+                "cursor": 0,
+                "items": [],
+                "observations": [],
+            }
         owner = cart.get("user_id", 0)
         cart.clear()
         cart.update({"user_id": owner, "status": "collecting_extras", "cursor": 0, "items": items, "observations": []})

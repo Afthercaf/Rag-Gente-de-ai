@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 from contextlib import asynccontextmanager
 
@@ -8,10 +9,11 @@ from core.state import state
 from services.resource_loader import load_resources_background
 from src.telegram_bot import run_bot
 
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Iniciando Pizzería 220 API...")
+    logger.info("Iniciando Pizzería 220 API.")
     state["ready"] = False
 
     # Telegram bot en hilo daemon
@@ -25,13 +27,11 @@ async def lifespan(app: FastAPI):
     loading_task = asyncio.create_task(load_resources_background())
     state["loading_task"] = loading_task
 
-    print("✅ API iniciada (recursos cargando en background)")
-    print("📍 API disponible en: http://localhost:8000")
-    print("📖 Documentación: http://localhost:8000/docs")
+    logger.info("API iniciada; recursos cargando en background.")
 
     yield
 
-    print("👋 Cerrando API...")
+    logger.info("Cerrando API.")
     if state.get("loading_task"):
         state["loading_task"].cancel()
 
@@ -39,5 +39,5 @@ async def lifespan(app: FastAPI):
 def _start_bot() -> None:
     try:
         asyncio.run(run_bot())
-    except Exception as e:
-        print(f"⚠️ Telegram no disponible: {e}")
+    except Exception:
+        logger.exception("Telegram no disponible.")

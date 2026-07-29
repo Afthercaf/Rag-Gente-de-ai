@@ -3,10 +3,12 @@ import html
 import json
 import time
 import requests
+import logging
 from typing import Optional, Dict, Any
-from dotenv import load_dotenv
+import core.config  # Carga centralizada del entorno.
+from core.telegram_callback import build_callback
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -33,7 +35,7 @@ def send_telegram_order(
     con botones inline para que el staff gestione el estado.
     """
     if not BOT_TOKEN or not CHAT_ID:
-        print("❌ Telegram no configurado (BOT_TOKEN o CHAT_ID faltantes)")
+        logger.warning("Telegram no configurado.")
         return False
 
     lat = None
@@ -90,15 +92,15 @@ def send_telegram_order(
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "✅ CONFIRMAR", "callback_data": f"confirm_{order_id}"},
-                {"text": "🍕 PREPARANDO", "callback_data": f"preparing_{order_id}"}
+                {"text": "✅ CONFIRMAR", "callback_data": build_callback("confirm", order_id)},
+                {"text": "🍕 PREPARANDO", "callback_data": build_callback("preparing", order_id)}
             ],
             [
-                {"text": "🛵 EN CAMINO", "callback_data": f"delivery_{order_id}"},
-                {"text": "🎉 ENTREGADO", "callback_data": f"delivered_{order_id}"}
+                {"text": "🛵 EN CAMINO", "callback_data": build_callback("delivery", order_id)},
+                {"text": "🎉 ENTREGADO", "callback_data": build_callback("delivered", order_id)}
             ],
             [
-                {"text": "❌ CANCELAR", "callback_data": f"cancel_{order_id}"}
+                {"text": "❌ CANCELAR", "callback_data": build_callback("cancel", order_id)}
             ]
         ]
     }
@@ -120,21 +122,19 @@ def send_telegram_order(
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    print(f"📤 Enviando pedido #{order_id} a Telegram...")
-    if ubicacion:
-        print(f"📍 Con ubicación: {ubicacion}")
+    logger.info("Enviando pedido a Telegram; order_id=%s", order_id)
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
             response = requests.post(url, json=payload, timeout=60)
 
-            print(f"STATUS: {response.status_code}")
+            logger.info("Telegram respondió status=%s", response.status_code)
             
             if response.status_code == 200:
                 result = response.json()
                 if result.get("ok"):
-                    print(f"✅ Pedido #{order_id} enviado a Telegram correctamente")
+                    logger.info("Pedido enviado a Telegram; order_id=%s", order_id)
                     
                     # Enviar ubicación como mensaje separado si hay coordenadas
                     if lat is not None and lng is not None:
@@ -142,25 +142,29 @@ def send_telegram_order(
                     
                     return True
                 else:
-                    print(f"❌ Error en respuesta de Telegram: {result}")
+                    logger.warning("Telegram rechazó el mensaje.")
             else:
-                print(f"❌ Error HTTP {response.status_code}: {response.text[:200]}")
+                logger.warning("Telegram respondió status=%s", response.status_code)
 
             if attempt < max_retries - 1:
                 wait_time = attempt + 2
-                print(f"🔄 Reintentando en {wait_time} segundos...")
+                logger.info("Reintentando Telegram en %s segundos.", wait_time)
                 time.sleep(wait_time)
 
         except requests.exceptions.Timeout:
-            print(f"⚠️ Timeout (intento {attempt + 1})")
+            logger.warning("Timeout de Telegram; intento=%s", attempt + 1)
             if attempt < max_retries - 1:
                 time.sleep(3)
-        except Exception as e:
-            print(f"❌ Error: {e}")
+        except Exception:
+            logger.exception("Error enviando pedido a Telegram.")
             if attempt < max_retries - 1:
                 time.sleep(3)
 
-    print(f"❌ No se pudo enviar el pedido #{order_id} a Telegram tras {max_retries} intentos")
+    logger.error(
+        "No se pudo enviar el pedido a Telegram; order_id=%s intentos=%s",
+        order_id,
+        max_retries,
+    )
     return False
 
 
@@ -182,16 +186,16 @@ def send_telegram_location(order_id: str, latitude: float, longitude: float) -> 
 
     try:
         response = requests.post(url, json=payload, timeout=30)
-        print(f"📍 MAP STATUS: {response.status_code}")
+        logger.info("Telegram ubicación respondió status=%s", response.status_code)
         
         if response.status_code == 200:
             result = response.json()
             if result.get("ok"):
-                print(f"✅ Ubicación del pedido #{order_id} enviada a Telegram")
+                logger.info("Ubicación enviada a Telegram; order_id=%s", order_id)
                 return True
         return False
-    except Exception as e:
-        print(f"❌ Error enviando ubicación a Telegram: {e}")
+    except Exception:
+        logger.exception("Error enviando ubicación a Telegram.")
         return False
 
 
@@ -231,9 +235,13 @@ def send_order_status_update(order_id: str, new_status: str) -> bool:
         if response.status_code == 200:
             result = response.json()
             if result.get("ok"):
-                print(f"✅ Actualización de estado #{order_id} -> {new_status} enviada")
+                logger.info(
+                    "Estado enviado a Telegram; order_id=%s status=%s",
+                    order_id,
+                    new_status,
+                )
                 return True
         return False
-    except Exception as e:
-        print(f"❌ Error enviando actualización: {e}")
+    except Exception:
+        logger.exception("Error enviando actualización a Telegram.")
         return False

@@ -2,7 +2,10 @@ import os
 import logging
 import httpx
 import asyncio          
-from dotenv import load_dotenv
+import time
+from collections import defaultdict, deque
+import core.config  # Carga centralizada del entorno.
+from core.telegram_callback import verify_callback
 
 from telegram import (
     Update,
@@ -17,10 +20,17 @@ from telegram.ext import (
     ContextTypes,
 )
 
-load_dotenv()
-
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_BASE = os.getenv("API_BASE_URL", "https://ai-backend-gu75.onrender.com")
+API_BASE = os.getenv("API_BASE_URL")
+API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
+ADMIN_IDS = {
+    int(value.strip())
+    for value in os.getenv("TELEGRAM_ADMIN_IDS", "").split(",")
+    if value.strip().isdigit()
+}
+_callback_attempts = defaultdict(deque)
+CALLBACK_LIMIT = 12
+CALLBACK_WINDOW_SECONDS = 60
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -84,13 +94,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def update_order(order_id: str, status: str):
 
+    if not API_BASE or not API_TOKEN:
+        logger.error("API_BASE_URL o TELEGRAM_API_TOKEN no configurado")
+        return False
+
     try:
 
         async with httpx.AsyncClient(timeout=30) as client:
 
             response = await client.patch(
                 f"{API_BASE}/order/{order_id}/status",
-                json={"status": status}
+                json={"status": status},
+                headers={"Authorization": f"Bearer {API_TOKEN}"},
             )
 
             logger.info(
@@ -154,9 +169,22 @@ async def button_handler(
 
     await query.answer()
 
-    data = query.data
+    actor_id = update.effective_user.id if update.effective_user else None
+    if actor_id not in ADMIN_IDS:
+        logger.warning("Callback Telegram no autorizado: user_id=%s", actor_id)
+        await query.answer("No autorizado", show_alert=True)
+        return
 
-    logger.info(f"Callback recibido: {data}")
+    now = time.monotonic()
+    attempts = _callback_attempts[actor_id]
+    while attempts and now - attempts[0] > CALLBACK_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= CALLBACK_LIMIT:
+        await query.answer("Demasiadas solicitudes. Intenta más tarde.", show_alert=True)
+        return
+    attempts.append(now)
+
+    data = query.data
 
     if data == "disabled":
 
@@ -167,15 +195,12 @@ async def button_handler(
 
         return
 
-    try:
-
-        action, order_id = data.split("_", 1)
-
-    except ValueError:
-
-        logger.error(f"Callback inválido: {data}")
-
+    verified = verify_callback(data)
+    if verified is None:
+        logger.warning("Callback Telegram inválido o expirado.")
+        await query.answer("Acción inválida o expirada", show_alert=True)
         return
+    action, order_id = verified
 
     if action not in STATUS_MAP:
 
@@ -297,11 +322,14 @@ async def error_handler(
 
 async def run_bot():
 
-    if not BOT_TOKEN:
-        print("TELEGRAM_BOT_TOKEN no configurado")
+    if not BOT_TOKEN or not ADMIN_IDS or not API_BASE or not API_TOKEN:
+        logger.error(
+            "Telegram requiere TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS, "
+            "API_BASE_URL y TELEGRAM_API_TOKEN"
+        )
         return
 
-    print("Iniciando bot Telegram...")
+    logger.info("Iniciando bot Telegram...")
 
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
@@ -312,7 +340,7 @@ async def run_bot():
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
 
-    print("Bot Telegram iniciado correctamente")
+    logger.info("Bot Telegram iniciado correctamente")
     await asyncio.Event().wait()
 
 # =====================================================

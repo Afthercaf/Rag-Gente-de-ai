@@ -1,9 +1,11 @@
 import re
 import asyncio
+import logging
 from typing import Any
 from datetime import datetime
 
 from core.state import state
+from core.prompt_guard import contains_system_prompt_fragment
 from services import rag_service
 from services.intent_detector import build_directive, LITERAL_RESPONSE_PREFIX
 from services.payment_service import (
@@ -22,6 +24,8 @@ from services.payment_handler import (
     get_payment_status_message,
     detect_payment_intent,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_reference_text(value: str) -> str:
@@ -115,10 +119,7 @@ def _resolve_contextual_pizza_question(
                         flags=re.IGNORECASE,
                     ).strip()
 
-                    print(
-                        "🔗 [REFERENCIA] "
-                        f"'{question}' resuelto como Pizza {display_name}"
-                    )
+                    logger.debug("Referencia contextual de pizza resuelta")
                     return f"Quiero una Pizza {display_name}"
 
     return question
@@ -166,24 +167,71 @@ async def generate_response(
         last_order = get_last_order(session, user_id)
     best_seller = rag_service.get_best_seller()
 
-    # ── LOG DIAGNÓSTICO: extras_context ─────────────────────────
-    print(f"\n🧩 [LOG EXTRAS] --- DIAGNÓSTICO DE EXTRAS_CONTEXT ---")
-    if extras_context:
-        print(f"✅ [LOG EXTRAS] extras_context tiene {len(extras_context)} caracteres")
-        print(f"📄 [LOG EXTRAS] Contenido:\n{extras_context}")
-    else:
-        print(f"⚠️ [LOG EXTRAS] extras_context está VACÍO o es None: {extras_context!r}")
-        print(f"⚠️ [LOG EXTRAS] -> rag_service.get_available_extras_context() no devolvió nada.")
+    logger.debug("Contexto de extras disponible=%s", bool(extras_context))
 
     # ── OBTENER TOTAL DEL ÚLTIMO PEDIDO (para pago) ──────────────
     total = _extract_last_total(history)
     order_id = _extract_last_order_id(history) or f"PED-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    print(f"💰 [LOG PAGO] Total del último pedido: {total}")
-    print(f"📦 [LOG PAGO] Order ID: {order_id}")
 
     # ── ESTADO DE PAGO EN EFECTIVO CONTROLADO POR SESIÓN ─────────
     # Mercado Pago se conserva como opción final; el flujo en efectivo se
     # resuelve aquí para que una cantidad como "1200" no caiga al fallback.
+    wants_to_fix_extras = bool(re.search(
+        r"\b(?:extra|extras|falto|falta|faltan|agrega|agregar|añade|anade)\b",
+        question.strip().lower(),
+    ))
+    pending_checkout = bool(
+        current_cart
+        and current_cart.get("status") in {"awaiting_payment", "awaiting_location"}
+    )
+    normalized_checkout_question = _normalize_reference_text(question)
+
+    if (
+        pending_checkout
+        and re.search(
+            r"\b(?:cancelar|cancela|no quiero|ya no quiero|olvida el pedido)\b",
+            normalized_checkout_question,
+        )
+    ):
+        current_cart.clear()
+        current_cart.update({
+            "status": "cancelled",
+            "items": [],
+            "cursor": 0,
+            "user_id": user_id,
+        })
+        return "✅ Pedido pendiente cancelado. Puedes iniciar uno nuevo cuando quieras."
+
+    if (
+        pending_checkout
+        and wants_to_fix_extras
+    ):
+        current_cart["status"] = "collecting_extras"
+        current_cart["cursor"] = 0
+        current_cart.pop("payment_method", None)
+        return (
+            "Claro, todavía puedes corregir los extras antes de enviar el pedido.\n\n"
+            f"{extras_context}\n\n"
+            "Escribe los extras que deseas agregar o responde “ninguno”."
+        )
+
+    if (
+        pending_checkout
+        and normalized_checkout_question
+        in {"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"}
+    ):
+        pizzas = ", ".join(
+            str(item.get("pizza") or "Pizza")
+            for item in current_cart.get("items", [])
+        )
+        return (
+            f"¡Hola! 🍕 Tienes un pedido pendiente: {pizzas}.\n\n"
+            "Puedes escribir:\n"
+            "• continuar\n"
+            "• faltan mis extras\n"
+            "• cancelar pedido"
+        )
+
     if current_cart and current_cart.get("status") == "awaiting_payment":
         qn = question.strip().lower()
 
@@ -213,11 +261,11 @@ async def generate_response(
 
     # ── DETECTAR INTENCIÓN DE PAGO DINÁMICA ──────────────────────
     payment_intent = detect_payment_intent(question)
-    print(f"💳 [LOG PAGO] Intención de pago detectada: {payment_intent}")
+    logger.debug("Intención de pago detectada=%s", payment_intent["is_payment"])
 
     # ── SI EL USUARIO QUIERE CONFIRMAR UN PAGO ───────────────────
     if "confirmar pago" in question.lower() or "ya pagué" in question.lower() or "verificar pago" in question.lower():
-        print(f"🔍 [LOG PAGO] Verificando pago para pedido: {order_id}")
+        logger.info("Verificando estado de pago")
         confirm_result = confirm_payment(order_id)
         if confirm_result["success"] and confirm_result.get("confirmed"):
             return confirm_result["message"]
@@ -231,17 +279,18 @@ async def generate_response(
     if payment_intent["is_payment"] and total:
         amount = payment_intent.get("amount") or _extract_amount(total)
         if amount and amount > 0:
-            print(f"💰 [LOG PAGO] Procesando pago de ${amount} para pedido {order_id}")
+            logger.info("Procesando pago validado por el servidor")
 
             # Procesar pago con Mercado Pago o Efectivo
+            # VULN-03: evitar datos de ejemplo; usar valores mínimos anonimizados.
             payment_result = handle_payment_in_chat(
                 user_id=user_id,
                 order_id=order_id,
                 amount=amount,
                 description=f"Pedido {order_id} - {_extract_product_name(history)}",
                 method=payment_intent.get("method", "mercadopago"),
-                user_email=f"cliente_{order_id}@example.com",
-                user_name="Cliente Pizzería 220",
+                user_email=f"pedido-{order_id}@anonimo.local",
+                user_name="Cliente",
             )
 
             if payment_result["success"]:
@@ -279,16 +328,14 @@ Total a pagar: **{total if total else "Consultando..."}**
 
     # ── DETECTAR PREGUNTA DE PAGO (legacy) ──────────────────────
     is_payment = total and is_payment_question(question)
-    print(f"💳 [LOG PAGO] ¿Es pregunta de pago (legacy)? {is_payment}")
+    logger.debug("Pregunta de pago=%s", bool(is_payment))
 
     if is_payment:
-        print(f"💳 [LOG PAGO] Detectada pregunta de pago: '{question}'")
         directive = build_payment_directive(
             question=question,
             total=total,
             history=history,
         )
-        print(f"📋 [LOG PAGO] Directive de pago generada:\n{directive}")
     else:
         # ── DIRECTIVA NORMAL ──────────────────────────────────────────
         directive = build_directive(
@@ -303,7 +350,6 @@ Total a pagar: **{total if total else "Consultando..."}**
             last_order=last_order,
             user_id=user_id,
         )
-        print(f"📋 [LOG EXTRAS] Directive generada para el LLM:\n{directive}\n")
 
         # ── FIX: resumen final 100% literal, sin pasar por el LLM ────
         # build_directive() marca con LITERAL_RESPONSE_PREFIX los casos
@@ -317,7 +363,7 @@ Total a pagar: **{total if total else "Consultando..."}**
         # vez del pedido recién armado). Si el prefijo está presente,
         # se devuelve el texto directo, sin invocar al modelo.
         if directive.startswith(LITERAL_RESPONSE_PREFIX):
-            print("⚡ [LOG] Resumen final generado en Python — se omite la llamada al LLM.")
+            logger.debug("Respuesta literal generada sin invocar al modelo")
             return directive[len(LITERAL_RESPONSE_PREFIX):]
 
     # ── CONSTRUIR CONTEXTO COMPLETO ──────────────────────────────
@@ -326,9 +372,6 @@ Total a pagar: **{total if total else "Consultando..."}**
     if extras_context:
         full_context += "\n\n=== INFORMACIÓN DE EXTRAS ===\n"
         full_context += extras_context
-        print(f"✅ [LOG EXTRAS] Sección '=== INFORMACIÓN DE EXTRAS ===' AÑADIDA a full_context")
-    else:
-        print(f"🚨 [LOG EXTRAS] Sección de extras NO añadida a full_context (extras_context vacío)")
 
     # Si es pago, agregar información del total al contexto
     if is_payment and total:
@@ -337,9 +380,6 @@ Total a pagar: **{total if total else "Consultando..."}**
         full_context += f"Métodos de pago disponibles: Efectivo, Mercado Pago (tarjeta/QR)\n"
         full_context += f"Si el cliente pregunta por métodos de pago, ofrecelos.\n"
         full_context += f"Si el cliente quiere pagar, genera un pago con Mercado Pago.\n"
-        print(f"✅ [LOG PAGO] Información de pago añadida al contexto")
-
-    print(f"🧩 [LOG EXTRAS] --- FIN DIAGNÓSTICO ---\n")
 
     # ── GENERAR PROMPT Y LLAMAR AL MODELO ─────────────────────────
     prompt = state["prompt_template"].format_messages(
@@ -372,7 +412,10 @@ Total a pagar: **{total if total else "Consultando..."}**
         "print(\"hola, mundo", "print('hola, mundo",
     )
     normalized_output = raw_response.lower()
-    if any(marker in normalized_output for marker in leak_markers):
+    if (
+        any(marker in normalized_output for marker in leak_markers)
+        or contains_system_prompt_fragment(raw_response)
+    ):
         return (
             "No puedo proporcionar información interna del sistema. "
             "Puedo ayudarte con el menú, precios o un pedido."

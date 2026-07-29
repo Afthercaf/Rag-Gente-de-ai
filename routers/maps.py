@@ -4,18 +4,18 @@ import os
 from typing import Any
 
 import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from core.config import require_env
+from core.security import CurrentUser, get_current_user
 
 router = APIRouter(
     prefix="/maps",
     tags=["maps"],
 )
 
-LOCATIONIQ_API_KEY = os.getenv(
-    "LOCATIONIQ_API_KEY",
-)
+LOCATIONIQ_API_KEY = require_env("LOCATIONIQ_API_KEY")
 
 REQUEST_TIMEOUT = (5, 15)
 
@@ -24,6 +24,7 @@ REQUEST_TIMEOUT = (5, 15)
 def reverse_geocode(
     lat: float = Query(ge=-90, le=90),
     lng: float = Query(ge=-180, le=180),
+    _: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     response = requests.get(
         "https://nominatim.openstreetmap.org/reverse",
@@ -72,6 +73,7 @@ def search_address(
         min_length=3,
         max_length=200,
     ),
+    _: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     response = requests.get(
         "https://nominatim.openstreetmap.org/search",
@@ -121,6 +123,7 @@ def static_map(
     zoom: int = Query(default=16, ge=1, le=20),
     width: int = Query(default=400, ge=100, le=800),
     height: int = Query(default=200, ge=100, le=800),
+    _: CurrentUser = Depends(get_current_user),
 ) -> Response:
     if not LOCATIONIQ_API_KEY:
         raise HTTPException(

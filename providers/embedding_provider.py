@@ -3,11 +3,9 @@ import logging
 import os
 from typing import Any, List
 
-from dotenv import load_dotenv
+import core.config  # Carga centralizada del entorno.
 
 from providers.huggingface_embeddings import HuggingFaceEmbeddings
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 

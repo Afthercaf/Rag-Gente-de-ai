@@ -3,7 +3,12 @@ import asyncio
 from typing import Any, Dict, Optional
 
 from core.password_security import hash_password, password_needs_rehash, verify_password
-from src.supabase_auth import get_user_by_gmail, register_user, update_user_password_hash
+from src.supabase_auth import (
+    get_user_by_gmail,
+    get_user_by_id,
+    register_user,
+    update_user_password_hash,
+)
 
 _ALLOWED_USER_FIELDS = {
     "id", "public_id", "nombre", "telefono", "gmail",
@@ -23,7 +28,7 @@ async def register(nombre: str, telefono: str, gmail: str, direccion: str, passw
     try:
         password_hash = hash_password(password)
     except (TypeError, ValueError) as exc:
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "message": "No fue posible registrar al usuario."}
 
     user = await asyncio.to_thread(
         register_user,
@@ -56,3 +61,8 @@ async def login(gmail: str, password: str) -> Optional[Dict[str, Any]]:
         await asyncio.to_thread(update_user_password_hash, user["id"], new_hash)
 
     return _public_user(user)
+
+
+async def get_profile(user_id: int) -> Optional[Dict[str, Any]]:
+    user = await asyncio.to_thread(get_user_by_id, user_id)
+    return _public_user(user) if user else None

@@ -1,4 +1,5 @@
 import re
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,6 +16,7 @@ from services.intent_detector import (
     has_order_intent,
     has_pizza_name,
     is_order_flow_active,
+    is_prompt_injection,
 )
 from services.session_service import (
     append_to_history,
@@ -28,6 +30,8 @@ from services.session_service import (
 )
 from src.supabase_chat import delete_chat_history, get_chat_history
 from utils.cache_keys import get_cache_key
+
+logger = logging.getLogger(__name__)
 
 
 # ── Frases que indican "repetir mi último pedido" (BUG 1) ──────────────
@@ -69,6 +73,8 @@ _ACTIVE_CART_STATUSES = {
     "asking_any_extras",
     "collecting_extras",
     "awaiting_confirmation",
+    "awaiting_payment",
+    "awaiting_location",
     "awaiting_payment_method",
     "awaiting_cash_amount",
 }
@@ -134,7 +140,7 @@ async def chat(
 ):
     """Chat con memoria por usuario + RAG contextual (robusto)."""
     if not state["ready"]:
-        print("⏳ [CHAT] Sistema NO listo - inicializando...")
+        logger.info("Sistema de chat inicializando")
         return JSONResponse(content={
             "reply": "⏳ Sistema inicializando... Por favor espera unos segundos.",
             "is_order": False,
@@ -142,11 +148,19 @@ async def chat(
 
     query = req.message.strip()
     if not query:
-        print("⚠️ [CHAT] Mensaje vacío")
+        logger.info("Mensaje de chat vacío rechazado")
         return JSONResponse(content={"reply": ""})
 
+    # VULN-11/12/13: bloquear intentos de prompt injection y extracción de datos.
+    if is_prompt_injection(query):
+        logger.warning("Solicitud de chat bloqueada por política de seguridad")
+        return JSONResponse(content={
+            "reply": "No puedo procesar esa solicitud. Puedo ayudarte con el menú, precios o un pedido.",
+            "is_order": False,
+        })
+
     session = get_user_session(current_user.internal_id)
-    print(f"👤 Usuario: {current_user.internal_id} | 🧠 Historial: {len(session['history'])} msgs")
+    logger.debug("Sesión de chat cargada; mensajes=%d", len(session["history"]))
 
     # ── Pizzas del RAG (robusto: nunca lanza) ───────────────────────
     try:
@@ -200,7 +214,7 @@ async def chat(
         cache_key = get_cache_key(query, current_user.internal_id)
         cached = response_cache.get(cache_key)
         if cached:
-            print("📦 [CHAT] Respuesta desde caché")
+            logger.debug("Respuesta de chat servida desde caché")
             return JSONResponse(content=cached)
 
     try:
@@ -250,22 +264,19 @@ async def chat(
                     total=order_details.get("total", ""),
                 )
                 set_last_order(session, confirmed, current_user.internal_id)
-                print(f"💾 [LAST_ORDER] Guardado: {confirmed.producto} x{confirmed.cantidad}")
+                logger.info("Último pedido guardado en sesión cifrada")
 
         result = {
             "reply": content,
             "is_order": is_order,
             "order_details": order_details,
-            "user_id": str(current_user.public_id),
         }
         if cache_allowed and cache_key is not None:
             response_cache.set(cache_key, result)
         return JSONResponse(content=result)
 
     except Exception as e:
-        import traceback
-        print(f"❌ Error en /chat (degradando sin RAG): {e}")
-        traceback.print_exc()
+        logger.exception("Error procesando chat; activando respuesta degradada")
         # BUG 4: nunca devolvemos HTTP 500 por fallos internos. Respondemos
         # con un mensaje útil usando solo memoria conversacional.
         try:
@@ -282,13 +293,11 @@ async def chat(
             return JSONResponse(content={
                 "reply": fallback,
                 "is_order": False,
-                "user_id": str(current_user.public_id),
             })
         except Exception:
             return JSONResponse(content={
                 "reply": "Lo siento, tuve un problema procesando tu mensaje. ¿Podrías reformularlo?",
                 "is_order": False,
-                "user_id": str(current_user.public_id),
             })
 
 
@@ -298,7 +307,7 @@ async def chat(
 
 async def _handle_repeat_order(req: SecureChatRequest, session: dict, last_order: LastOrder, current_user: CurrentUser):
     """Reconstruye el último pedido y pregunta si confirmar de nuevo."""
-    print(f"🔁 [REPEAT] Cliente quiere repetir: {last_order.producto}")
+    logger.info("Solicitud para repetir el último pedido")
     lines = [
         "Este fue tu último pedido:",
         "",
@@ -322,7 +331,6 @@ async def _handle_repeat_order(req: SecureChatRequest, session: dict, last_order
         "reply": content,
         "is_order": True,
         "order_details": last_order.to_dict(),
-        "user_id": str(current_user.public_id),
     })
 
 
@@ -332,7 +340,7 @@ async def _handle_repeat_order(req: SecureChatRequest, session: dict, last_order
 
 async def _handle_active_flow(req: SecureChatRequest, session: dict, pizza_names: list, query: str, current_user: CurrentUser):
     """El flujo de pedido tiene prioridad absoluta: sin RAG ni promociones."""
-    print(f"🔒 [FLOW] Flujo activo — RAG/promos omitidos por prioridad de flujo")
+    logger.debug("Flujo activo; RAG y promociones omitidos")
     # Inyectar SOLO el menú con precios para que el LLM tenga contexto de
     # precios/ingredientes sin salir del flujo.
     menu_context = rag_service.get_menu_context()
@@ -369,16 +377,12 @@ async def _handle_active_flow(req: SecureChatRequest, session: dict, pizza_names
             "reply": content,
             "is_order": is_order,
             "order_details": order_details,
-            "user_id": str(current_user.public_id),
         })
     except Exception as e:
-        import traceback
-        print(f"❌ Error en flujo activo (degradando): {e}")
-        traceback.print_exc()
+        logger.exception("Error en flujo activo; activando respuesta degradada")
         return JSONResponse(content={
             "reply": "¿En qué puedo continuar con tu pedido?",
             "is_order": True,
-            "user_id": str(current_user.public_id),
         })
 
 
@@ -458,6 +462,11 @@ async def quick_reply(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Respuestas rápidas predefinidas; cae en /chat si no hay match."""
+    if is_prompt_injection(req.message):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solicitud no permitida",
+        )
     query = req.message.lower().strip()
 
     menu_keywords = [
@@ -496,6 +505,32 @@ async def quick_reply(
     )
 
 
+@router.get("/extras")
+async def available_extras(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Entrega al frontend el catálogo calculado por la misma fuente RAG."""
+    del current_user
+    context = rag_service.get_available_extras_context()
+    extras: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for line in context.splitlines():
+        match = re.search(
+            r"^[•*\-\s]*(.+?)\s*(?:—|-)\s*\$\s*([0-9]+(?:[.,][0-9]{1,2})?)",
+            line.strip(),
+        )
+        if not match:
+            continue
+        name = match.group(1).strip(" •*-")
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        price = float(match.group(2).replace(",", "."))
+        extras.append({"name": name, "price": f"${price:.2f} MXN"})
+    return {"extras": extras[:50]}
+
+
 @router.get("/history")
 async def history(
     limit: int = 50,
@@ -504,7 +539,6 @@ async def history(
     limit = max(1, min(limit, 100))
     messages = get_chat_history(current_user.internal_id, limit=limit)
     return JSONResponse({
-        "user_id": str(current_user.public_id),
         "messages_count": len(messages),
         "history": messages,
     })
@@ -521,6 +555,5 @@ async def delete_history(
     )
     return JSONResponse({
         "status": "ok" if success else "error",
-        "user_id": str(current_user.public_id),
         "deleted": success,
     })

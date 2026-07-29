@@ -2,6 +2,7 @@
 Router para pagos con Mercado Pago
 """
 
+import json
 import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -17,8 +18,9 @@ class PaymentRequest(BaseModel):
     amount: float = Field(..., gt=0)
     description: str = Field(..., max_length=255)
     order_id: str = Field(..., description="ID del pedido al que pertenece este pago")
-    email: str = Field(default="cliente@example.com")
-    name: str = Field(default="Cliente")
+    # VULN-03: no usar email de ejemplo; se obtiene de la orden real.
+    email: str = Field(..., min_length=5)
+    name: str = Field(..., min_length=1)
 
 
 class PaymentLinkRequest(BaseModel):
@@ -26,7 +28,8 @@ class PaymentLinkRequest(BaseModel):
     description: str = Field(..., max_length=255)
     order_id: str = Field(..., description="ID del pedido al que pertenece este pago")
     title: str = Field(default="Pago Pizzería 220")
-    email: str = Field(default="cliente@example.com")
+    # VULN-03: no usar email de ejemplo; se obtiene de la orden real.
+    email: str = Field(..., min_length=5)
 
 
 @router.get("/test")
@@ -45,8 +48,9 @@ async def test_mercadopago():
     result = mercadopago_service.create_payment(
         amount=100.00,
         description="🍕 Pago de prueba",
-        email="test@example.com",
         order_id="test-123",
+        user_email="test@example.com",
+        user_name="Prueba",
     )
 
     return {
@@ -60,10 +64,6 @@ async def test_mercadopago():
             "ticket_url": result.ticket_url,
         },
         "error": result.error_message,
-        "test_cards": [
-            {"brand": "Mastercard", "number": "5031 7557 3453 0604", "cvv": "123", "expiry": "11/25"},
-            {"brand": "Visa", "number": "4509 9535 6623 3704", "cvv": "123", "expiry": "11/25"},
-        ]
     }
 
 
@@ -146,11 +146,21 @@ async def get_payment_status(payment_id: str):
 
 @router.post("/callback")
 async def payment_callback(request: Request):
-    """Callback para notificaciones"""
+    """Callback para notificaciones de Mercado Pago."""
+    body = await request.body()
+    signature = request.headers.get("x-signature") or request.headers.get("X-Signature")
+
+    if not mercadopago_service.verify_webhook_signature(
+        signature_header=signature,
+        request_body=body,
+    ):
+        logger.warning("🚫 Webhook con firma inválida rechazado")
+        raise HTTPException(status_code=401, detail="Firma inválida")
+
     try:
-        data = await request.json()
-        logger.info(f"📨 Callback recibido: {data}")
+        data = json.loads(body.decode("utf-8"))
+        logger.info("📨 Callback recibido: %s", data)
         return {"success": True}
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"❌ Error procesando callback: {e}")
+        return {"success": False, "error": "No fue posible procesar el callback."}

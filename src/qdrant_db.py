@@ -7,6 +7,8 @@ from langchain_qdrant import QdrantVectorStore as LangchainQdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
+from core.config import require_env
+
 logger = logging.getLogger(__name__)
 
 # Solo se exporta el wrapper propio; evita que otros módulos importen
@@ -18,8 +20,8 @@ class QdrantVectorStoreWrapper:
     """Conexión a Qdrant Cloud"""
 
     def __init__(self, collection_name: str = "pizzeria_docs", vector_size: int | None = None):
-        self.url = os.getenv("QDRANT_URL")
-        self.api_key = os.getenv("QDRANT_API_KEY")
+        self.url = require_env("QDRANT_URL")
+        self.api_key = require_env("QDRANT_API_KEY")
         self.collection_name = collection_name
         # El tamaño del vector se deduce del modelo de embeddings LOCAL en
         # uso (ya no se hardcodea 1024, que era el tamaño de Jina). Si no
@@ -31,9 +33,6 @@ class QdrantVectorStoreWrapper:
             except Exception:
                 vector_size = 1024
         self.vector_size = int(vector_size)
-
-        if not self.url or not self.api_key:
-            raise ValueError("QDRANT_URL y QDRANT_API_KEY son requeridas")
 
         logger.info("Conectando a Qdrant Cloud")
         self.client = QdrantClient(

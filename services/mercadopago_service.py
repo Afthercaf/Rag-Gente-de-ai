@@ -5,15 +5,19 @@ Servicio de Mercado Pago - Integración Dinámica para el Chat
 import os
 import logging
 import json
+import hmac
+import hashlib
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 import mercadopago
-from dotenv import load_dotenv
-
-load_dotenv()
+import redis
+import core.config  # Carga centralizada del entorno.
+from core.config import require_env
+from core.crypto import decrypt_json, derive_aes_key, encrypt_json
+from core.session_store import REDIS_URL
 
 logger = logging.getLogger(__name__)
 
@@ -132,15 +136,27 @@ class MercadoPagoService:
 
     def __init__(self):
         # Cargar credenciales
-        self.access_token = os.getenv("MERCADO_PAGO_ACCESS_TOKEN")
-        self.public_key = os.getenv("MERCADO_PAGO_PUBLIC_KEY")
+        self.access_token = require_env("MERCADO_PAGO_ACCESS_TOKEN")
+        self.public_key = require_env("MERCADO_PAGO_PUBLIC_KEY")
         self.mode = os.getenv("MERCADO_PAGO_MODE", "sandbox")
-        self.callback_url = os.getenv("MERCADO_PAGO_CALLBACK_URL", "http://localhost:8000/mp/callback")
+        self.callback_url = require_env("MERCADO_PAGO_CALLBACK_URL")
+        # Opcional al arrancar: si falta, verify_webhook_signature rechaza
+        # todos los webhooks (fail closed) sin deshabilitar pagos salientes.
+        self.webhook_secret = os.getenv("MERCADO_PAGO_WEBHOOK_SECRET")
         self.test_user = os.getenv("MERCADO_PAGO_TEST_USER")
         self.test_password = os.getenv("MERCADO_PAGO_TEST_PASSWORD")
         
-        # Sesiones de pago activas
-        self._sessions: Dict[str, PaymentSession] = {}
+        # Sesiones persistentes en Redis, cifradas y con TTL.
+        self._session_redis = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+        )
+        self._session_key = derive_aes_key(
+            require_env("SESSION_ENCRYPTION_KEY", min_length=32),
+            b"pizzeria220-payment-session-v1",
+        )
         self._payment_history: List[Dict] = []
         
         # Validar callback URL
@@ -171,34 +187,14 @@ class MercadoPagoService:
                 self.sdk = None
 
     def _log_credentials(self):
-        """Registra el estado de las credenciales de Mercado Pago."""
+        """Registra el estado de las credenciales de Mercado Pago sin exponer valores."""
         logger.info("=" * 70)
         logger.info("🔍 Verificando credenciales de Mercado Pago")
-        
-        logger.info(
-            "Access Token: %s",
-            (
-                f"{self.access_token[:12]}...{self.access_token[-6:]}"
-                if self.access_token
-                else "NO ENCONTRADO"
-            ),
-        )
-        
-        logger.info(
-            "Public Key: %s",
-            (
-                f"{self.public_key[:12]}...{self.public_key[-6:]}"
-                if self.public_key
-                else "NO ENCONTRADA"
-            ),
-        )
-        
+        logger.info("Access Token configurado: %s", bool(self.access_token))
+        logger.info("Public Key configurada: %s", bool(self.public_key))
         logger.info("Modo: %s", self.mode)
         logger.info("Callback URL: %s", self.callback_url)
-        logger.info(
-            "Longitud Access Token: %s", 
-            len(self.access_token) if self.access_token else 0
-        )
+        logger.info("Webhook secret configurado: %s", bool(self.webhook_secret))
         logger.info("=" * 70)
 
     def is_available(self) -> bool:
@@ -209,13 +205,61 @@ class MercadoPagoService:
         """Verifica si está en modo sandbox"""
         return self.mode == "sandbox"
 
+    @staticmethod
+    def _redis_session_key(order_id: str) -> str:
+        return f"payment-session:{order_id}"
+
+    def _save_session(self, session: PaymentSession) -> None:
+        payload = {
+            "user_id": session.user_id,
+            "order_id": session.order_id,
+            "amount": session.amount,
+            "description": session.description,
+            "status": session.status.value,
+            "payment_id": session.payment_id,
+            "qr_code": session.qr_code,
+            "payment_link": session.payment_link,
+            "created_at": session.created_at.isoformat(),
+            "expires_at": session.expires_at.isoformat(),
+            "user_email": session.user_email,
+            "user_name": session.user_name,
+            "attempts": session.attempts,
+        }
+        ttl = max(1, int((session.expires_at - datetime.now()).total_seconds()))
+        self._session_redis.setex(
+            self._redis_session_key(session.order_id),
+            ttl,
+            encrypt_json(payload, self._session_key),
+        )
+
+    def _load_session(self, order_id: str) -> Optional[PaymentSession]:
+        encrypted = self._session_redis.get(self._redis_session_key(order_id))
+        if not encrypted:
+            return None
+        payload = decrypt_json(encrypted, self._session_key)
+        if not payload:
+            self._session_redis.delete(self._redis_session_key(order_id))
+            return None
+        return PaymentSession(
+            user_id=int(payload["user_id"]),
+            order_id=str(payload["order_id"]),
+            amount=float(payload["amount"]),
+            description=str(payload["description"]),
+            status=PaymentStatus(payload["status"]),
+            payment_id=payload.get("payment_id"),
+            qr_code=payload.get("qr_code"),
+            payment_link=payload.get("payment_link"),
+            created_at=datetime.fromisoformat(payload["created_at"]),
+            expires_at=datetime.fromisoformat(payload["expires_at"]),
+            user_email=payload.get("user_email"),
+            user_name=payload.get("user_name"),
+            attempts=int(payload.get("attempts", 0)),
+        )
+
     def get_test_credentials(self) -> Dict:
-        """Retorna credenciales para mostrar en el chat"""
+        """Retorna información no sensible del modo de prueba."""
         return {
             "mode": self.mode,
-            "test_user": self.test_user,
-            "test_password": self.test_password,
-            "public_key": self.public_key,
             "available": self.is_available(),
         }
 
@@ -233,7 +277,7 @@ class MercadoPagoService:
             logger.error("❌ Servicio no disponible")
             return None
         
-        existing = self._sessions.get(order_id)
+        existing = self._load_session(order_id)
         if existing and not existing.is_expired():
             logger.info(f"⚠️ Ya existe una sesión activa para {order_id}")
             return existing
@@ -247,25 +291,27 @@ class MercadoPagoService:
             user_email=user_email,
             user_name=user_name,
         )
-        self._sessions[order_id] = session
+        self._save_session(session)
         logger.info(f"✅ Sesión de pago creada: {order_id} - ${amount:.2f}")
         return session
 
     def get_session(self, order_id: str) -> Optional[PaymentSession]:
         """Obtiene una sesión de pago"""
-        session = self._sessions.get(order_id)
+        session = self._load_session(order_id)
         if session and session.is_expired():
             logger.info(f"⏰ Sesión expirada: {order_id}")
             session.status = PaymentStatus.CANCELLED
+            self._save_session(session)
         return session
 
     def update_session(self, order_id: str, payment_id: str, status: PaymentStatus):
         """Actualiza una sesión de pago"""
-        session = self._sessions.get(order_id)
+        session = self._load_session(order_id)
         if session:
             session.payment_id = payment_id
             session.status = status
             session.attempts += 1
+            self._save_session(session)
             logger.info(f"🔄 Sesión actualizada: {order_id} -> {status.value}")
 
     def create_payment(
@@ -273,8 +319,8 @@ class MercadoPagoService:
         amount: float,
         description: str,
         order_id: str,
-        user_email: str = "cliente@example.com",
-        user_name: str = "Cliente",
+        user_email: str,
+        user_name: str,
         payment_method: str = "mercadopago",
     ) -> PaymentResult:
         """
@@ -321,7 +367,11 @@ class MercadoPagoService:
             if status != 201:
                 error_msg = response_data.get("message", "Error desconocido")
                 logger.error(f"❌ Error creando pago: {error_msg}")
-                logger.debug(f"Response: {response_data}")
+                logger.debug(
+                    "Mercado Pago rechazó la creación; status=%s code=%s",
+                    status,
+                    response_data.get("error") or response_data.get("status"),
+                )
                 return PaymentResult(
                     success=False,
                     error_message=error_msg,
@@ -351,7 +401,7 @@ class MercadoPagoService:
             logger.error(f"❌ Error inesperado: {e}", exc_info=True)
             return PaymentResult(
                 success=False,
-                error_message=str(e),
+                error_message="No fue posible crear el pago.",
             )
 
     def create_payment_link(
@@ -359,9 +409,9 @@ class MercadoPagoService:
         amount: float,
         description: str,
         order_id: str,
+        email: str,
+        name: str,
         title: str = "Pago Pizzería 220",
-        email: str = "cliente@example.com",
-        name: str = "Cliente",
         expires_in_minutes: int = 30,
         user_id: int = 0,
     ) -> Optional[PaymentLink]:
@@ -513,7 +563,7 @@ class MercadoPagoService:
         """
         Verifica el estado de un pago y actualiza la sesión
         """
-        session = self._sessions.get(order_id)
+        session = self._load_session(order_id)
         if not session or not session.payment_id:
             return None
 
@@ -521,6 +571,7 @@ class MercadoPagoService:
         if status_data:
             new_status = PaymentStatus(status_data.get("status", "pending"))
             session.status = new_status
+            self._save_session(session)
 
             return {
                 "order_id": order_id,
@@ -534,16 +585,17 @@ class MercadoPagoService:
 
     def cancel_session(self, order_id: str) -> bool:
         """Cancela una sesión de pago"""
-        session = self._sessions.get(order_id)
+        session = self._load_session(order_id)
         if session:
             session.status = PaymentStatus.CANCELLED
+            self._save_session(session)
             logger.info(f"❌ Sesión cancelada: {order_id}")
             return True
         return False
 
     def get_active_session_message(self, order_id: str) -> str:
         """Genera un mensaje para mostrar al usuario sobre su sesión de pago"""
-        session = self._sessions.get(order_id)
+        session = self._load_session(order_id)
         if not session:
             return "No hay un pago activo para este pedido."
 
@@ -593,6 +645,59 @@ Tiempo restante: {time_left} minutos
             "transfer": "bank_transfer",
         }
         return mapping.get(method.lower(), "bank_transfer")
+
+    def verify_webhook_signature(
+        self,
+        *,
+        signature_header: Optional[str],
+        request_body: bytes,
+    ) -> bool:
+        """Verifica la firma x-signature enviada por Mercado Pago.
+
+        VULN-22: rechazar webhooks cuya firma no coincida con el secreto.
+        """
+        if not self.webhook_secret or not signature_header:
+            return False
+
+        try:
+            parts = {
+                part.split("=")[0]: part.split("=", 1)[1]
+                for part in signature_header.split(",")
+                if "=" in part
+            }
+            timestamp = parts.get("ts", "")
+            signature = parts.get("v1", "")
+
+            if not timestamp or not signature:
+                return False
+
+            template_id = ""
+            body_text = request_body.decode("utf-8", errors="replace")
+            # Extraer id del JSON del body para preferencias/pagos.
+            try:
+                payload = json.loads(body_text)
+                data_id = payload.get("data", {}).get("id")
+                if not data_id:
+                    data_id = payload.get("id")
+                template_id = str(data_id) if data_id else ""
+            except Exception:
+                pass
+
+            signed_payload = (
+                f"{timestamp}.{template_id}.{body_text}"
+                if template_id
+                else f"{timestamp}.{body_text}"
+            )
+            expected = hmac.new(
+                self.webhook_secret.encode("utf-8"),
+                signed_payload.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+
+            return hmac.compare_digest(expected, signature)
+        except Exception as exc:
+            logger.warning("Error verificando firma de webhook: %s", exc)
+            return False
 
     def _parse_payment_response(self, response_data: Dict) -> PaymentResult:
         """Parsea la respuesta de Mercado Pago"""

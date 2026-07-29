@@ -1,12 +1,37 @@
 import asyncio
 import re
 import logging
+import unicodedata
 from typing import Optional, Dict, List, Set
 
 from core.state import state
 from utils.constants import TOP_K
 
 logger = logging.getLogger(__name__)
+
+_UNTRUSTED_INSTRUCTION_RE = re.compile(
+    r"\b(?:ignore|ignora|omite|olvida|system|developer|assistant|"
+    r"prompt|instrucciones?|jailbreak|roleplay|act[uú]a como|"
+    r"revela|muestra el contexto|ejecuta|tool call)\b",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_untrusted_context(value: str, *, max_chars: int = 20_000) -> str:
+    """Convierte documentos externos en datos, descartando instrucciones."""
+    normalized = unicodedata.normalize("NFKC", str(value))
+    normalized = re.sub(
+        r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]",
+        "",
+        normalized,
+    )
+    safe_lines = []
+    for line in normalized.splitlines():
+        clean = line.strip()
+        if not clean or _UNTRUSTED_INSTRUCTION_RE.search(clean):
+            continue
+        safe_lines.append(clean[:500])
+    return "\n".join(safe_lines)[:max_chars]
 
 # Cache en memoria
 _pizza_names_cache: list[str] = []
@@ -37,7 +62,9 @@ async def retrieve_context(search_query: str) -> str:
             logger.warning("retrieve_context: vector store no disponible aún.")
             return ""
         docs = await asyncio.to_thread(db.similarity_search, search_query, k=TOP_K)
-        return "\n".join(doc.page_content for doc in docs)
+        return _sanitize_untrusted_context(
+            "\n".join(doc.page_content for doc in docs)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error("retrieve_context falló (devolviendo ''): %s", exc, exc_info=True)
         return ""
@@ -46,7 +73,12 @@ async def retrieve_context(search_query: str) -> str:
 def get_promos_text() -> str:
     """Retorna el texto de todas las promociones cargadas (robusto)."""
     try:
-        return "\n".join(p.page_content for p in state.get("promo_documents", []) or [])
+        return _sanitize_untrusted_context(
+            "\n".join(
+                p.page_content
+                for p in state.get("promo_documents", []) or []
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("get_promos_text falló: %s", exc)
         return ""
@@ -61,9 +93,13 @@ def build_full_context(rag_context: str, promos_text: str) -> str:
     """
     parts = []
     if rag_context:
-        parts.append(f"--- INFORMACIÓN DE REFERENCIA ---\n{rag_context}")
+        safe_rag = _sanitize_untrusted_context(rag_context)
+        if safe_rag:
+            parts.append(f"<datos_rag>\n{safe_rag}\n</datos_rag>")
     if promos_text:
-        parts.append(f"--- PROMOCIONES ---\n{promos_text}")
+        safe_promos = _sanitize_untrusted_context(promos_text)
+        if safe_promos:
+            parts.append(f"<datos_promociones>\n{safe_promos}\n</datos_promociones>")
     return "\n\n".join(parts)
 
 

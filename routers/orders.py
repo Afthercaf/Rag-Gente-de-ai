@@ -7,13 +7,49 @@ import logging
 from core.state import state
 from schemas.order import OrderRequest, StatusUpdateRequest
 from services import order_service
-from services.session_service import get_user_session, clear_current_cart
+from services.session_service import (
+    get_user_session,
+    get_current_cart,
+    clear_current_cart,
+)
+from services.order_pricing import calculate_verified_cart_total
 from core.decorators import measure_time
 from core.security import CurrentUser, get_current_user, require_roles
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/order", tags=["orders"])
+
+
+def _verified_total_for_session(session: dict, user_id: int):
+    cart = get_current_cart(session, user_id)
+    if not cart:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No hay un carrito activo para verificar.",
+        )
+
+    if str(cart.get("status") or "").lower() not in {
+        "awaiting_payment",
+        "awaiting_location",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Confirma el pedido y el método de pago antes de enviar la ubicación.",
+        )
+
+    try:
+        return calculate_verified_cart_total(cart)
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Carrito inválido rechazado para user_id=%s: %s",
+            user_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El carrito ya no coincide con el menú disponible. Confirma el pedido nuevamente.",
+        ) from exc
 
 
 @router.post("")
@@ -29,12 +65,17 @@ async def create_new_order(
     logger.info(f"📝 [create_new_order] Recibiendo solicitud")
     logger.info("   - user_uuid: %s", current_user.public_id)
     logger.info(f"   - payment_method: '{req.payment_method}'")
-    logger.info(f"   - total: '{req.total}'")
     
     if not state.get("ready", False):
         return {"success": False, "message": "Sistema no listo"}
 
     try:
+        session = get_user_session(current_user.internal_id)
+        verified_total = _verified_total_for_session(
+            session,
+            current_user.internal_id,
+        )
+
         result = await order_service.place_order(
             user_id=current_user.internal_id,
             cliente_nombre=req.cliente_nombre,
@@ -43,8 +84,8 @@ async def create_new_order(
             direccion=req.direccion,
             pedido=req.pedido,
             payment_method=req.payment_method,
-            total=req.total,
-            ubicacion=req.ubicacion,
+            total=str(verified_total),
+            ubicacion=req.ubicacion.model_dump() if req.ubicacion else None,
         )
 
         logger.info(f"📦 [create_new_order] Resultado de place_order: {result}")
@@ -76,15 +117,20 @@ async def create_new_order(
                 direccion=req.direccion,
                 pedido=req.pedido,
                 payment_method=req.payment_method,
-                total=req.total,
-                ubicacion=req.ubicacion,
+                total=result["total"],
+                ubicacion=req.ubicacion.model_dump() if req.ubicacion else None,
             )
 
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Error creando orden: {e}", exc_info=True)
-        return {"success": False, "message": f"Error al crear la orden: {str(e)}"}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible crear la orden.",
+        )
 
 
 @router.patch("/{order_id}/status")
@@ -108,12 +154,16 @@ async def patch_order_status(
                 "message": f"Estado inválido. Estados válidos: {', '.join(valid_statuses)}"
             }
         
+        # Solo administradores pueden cambiar estado arbitrario.
         result = await order_service.patch_status(order_id, req.status)
         return result
         
     except Exception as e:
         logger.error(f"Error actualizando orden {order_id}: {e}")
-        return {"success": False, "message": f"Error al actualizar la orden: {str(e)}"}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible actualizar la orden.",
+        )
 
 
 @router.get("/{order_id}/status")
@@ -131,12 +181,25 @@ async def fetch_order_status(
     try:
         import uuid
         uuid.UUID(order_id)
-        result = await order_service.fetch_status(order_id)
+        # VULN-08/09: el cliente solo puede consultar sus propias órdenes.
+        result = await order_service.fetch_status(
+            order_id, owner_user_id=current_user.internal_id
+        )
+        if result.get("status") == "no_encontrado":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orden no encontrada",
+            )
         return result
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error obteniendo orden {order_id}: {e}")
-        return {"success": False, "message": f"Error al obtener la orden: {str(e)}"}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible obtener la orden.",
+        )
 
 
 @router.get("/mine")
@@ -200,4 +263,7 @@ async def cancel_order(
             
     except Exception as e:
         logger.error(f"Error cancelando orden {order_id}: {e}")
-        return {"success": False, "message": f"Error al cancelar la orden: {str(e)}"}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible cancelar la orden.",
+        )

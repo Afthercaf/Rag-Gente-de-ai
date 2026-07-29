@@ -27,6 +27,7 @@ from routers import (
     chat,
     health,
     maps,
+    mercadopago_webhook,
     orders,
     payment,
     voice,
@@ -125,18 +126,21 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(ALLOWED_ORIGINS),
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=[
         "GET",
         "POST",
+        "PUT",
         "PATCH",
         "DELETE",
         "OPTIONS",
     ],
     allow_headers=[
+        "Accept",
         "Authorization",
         "Content-Type",
         "X-Request-ID",
+        "X-Requested-With",
     ],
     expose_headers=[
         "X-Request-ID",
@@ -164,6 +168,7 @@ app.include_router(maps.router)
 app.include_router(chat.router)
 app.include_router(orders.router)
 app.include_router(payment.router)
+app.include_router(mercadopago_webhook.router)
 app.include_router(voice.router)
 app.include_router(cache.router)
 

@@ -4,19 +4,19 @@ import os
 import requests
 import logging
 import json
+import uuid
+import threading
 from typing import Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from requests.exceptions import RequestException
-from dotenv import load_dotenv
-
-load_dotenv()
+from core.config import require_env, supabase_server_key
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = require_env("SUPABASE_URL")
+SUPABASE_KEY = supabase_server_key()
 
 HEADERS = {
     "apikey":        SUPABASE_KEY,
@@ -32,9 +32,17 @@ RETRY_STRATEGY = Retry(
     backoff_factor=1,
 )
 
-SESSION = requests.Session()
-SESSION.mount("https://", HTTPAdapter(max_retries=RETRY_STRATEGY))
-SESSION.mount("http://", HTTPAdapter(max_retries=RETRY_STRATEGY))
+_SESSION_LOCAL = threading.local()
+
+
+def _session() -> requests.Session:
+    session = getattr(_SESSION_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.mount("https://", HTTPAdapter(max_retries=RETRY_STRATEGY))
+        session.mount("http://", HTTPAdapter(max_retries=RETRY_STRATEGY))
+        _SESSION_LOCAL.session = session
+    return session
 
 
 def create_order(data: dict) -> str | None:
@@ -44,7 +52,7 @@ def create_order(data: dict) -> str | None:
         if "ubicacion_maps" in data and isinstance(data["ubicacion_maps"], dict):
             data["ubicacion_maps"] = json.dumps(data["ubicacion_maps"])
         
-        response = SESSION.post(
+        response = _session().post(
             f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
             json=data,
@@ -63,21 +71,29 @@ def create_order(data: dict) -> str | None:
         return None
 
 
-def update_order_status(order_id: str, status: str) -> bool:
-    """Actualiza el estado de una orden."""
-    try:
-        print(f"\n🔄 Actualizando pedido {order_id}")
-        print(f"📌 Nuevo estado: {status}")
+def update_order_status(order_id: str, status: str, owner_user_id: int | None = None) -> bool:
+    """Actualiza el estado de una orden.
 
-        response = SESSION.patch(
-            f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
+    Si owner_user_id se proporciona, solo actualiza si el pedido pertenece
+    a ese usuario (VULN-08/09).
+    """
+    try:
+        validated_id = _validate_uuid(order_id)
+        logger.info("Actualizando estado de pedido")
+
+        params = {"id": f"eq.{validated_id}"}
+        if owner_user_id is not None:
+            params["user_id"] = f"eq.{owner_user_id}"
+
+        response = _session().patch(
+            f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
+            params=params,
             json={"estado": status},
             timeout=30,
         )
 
-        print("STATUS:", response.status_code)
-        print("BODY:", response.text)
+        logger.info("Supabase update status=%s", response.status_code)
 
         if response.status_code not in [200, 204]:
             return False
@@ -85,19 +101,27 @@ def update_order_status(order_id: str, status: str) -> bool:
         if response.status_code == 200:
             try:
                 data = response.json()
-                print("DATA:", data)
                 if isinstance(data, list) and len(data) == 0:
-                    print("❌ No existe pedido con ese ID")
+                    logger.info("Pedido no encontrado o no autorizado")
                     return False
             except Exception:
                 pass
 
-        print("✅ Pedido actualizado")
+        logger.info("Pedido actualizado")
         return True
 
     except Exception as e:
-        print("❌ ERROR SUPABASE:", e)
+        logger.exception("Error actualizando pedido en Supabase")
         return False
+
+
+def _validate_uuid(value: str, field_name: str = "order_id") -> str:
+    """Valida que el valor sea un UUID válido y lo retorna."""
+    try:
+        uuid.UUID(str(value))
+        return str(value)
+    except (ValueError, AttributeError):
+        raise ValueError(f"{field_name} debe ser un UUID válido")
 
 
 def get_order_status(order_id: str) -> str:
@@ -107,9 +131,14 @@ def get_order_status(order_id: str) -> str:
     al cliente las actualizaciones en tiempo casi-real.
     """
     try:
-        response = SESSION.get(
-            f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}&select=estado",
+        validated_id = _validate_uuid(order_id)
+        response = _session().get(
+            f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
+            params={
+                "id": f"eq.{validated_id}",
+                "select": "estado",
+            },
             timeout=30,
         )
         if response.status_code == 200:
@@ -142,7 +171,7 @@ def _get_all_orders(limit: int = 1000) -> list[dict]:
             "estado,created_at"
         )
 
-        response = SESSION.get(
+        response = _session().get(
             f"{SUPABASE_URL}/rest/v1/ordenes"
             f"?select={select_fields}"
             f"&estado=neq.cancelado"
@@ -174,9 +203,11 @@ def _get_all_orders(limit: int = 1000) -> list[dict]:
 def get_order_by_id(order_id: str) -> Optional[dict]:
     """Obtiene una orden completa por ID."""
     try:
-        response = SESSION.get(
-            f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
+        validated_id = _validate_uuid(order_id)
+        response = _session().get(
+            f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
+            params={"id": f"eq.{validated_id}"},
             timeout=30,
         )
         if response.status_code == 200:
@@ -186,6 +217,29 @@ def get_order_by_id(order_id: str) -> Optional[dict]:
         return None
     except Exception as e:
         logger.error(f"Error en get_order_by_id: {e}")
+        return None
+
+
+def get_order_by_id_and_owner(order_id: str, owner_user_id: int) -> Optional[dict]:
+    """Obtiene una orden solo si pertenece al usuario indicado (VULN-08/09)."""
+    try:
+        validated_id = _validate_uuid(order_id)
+        response = _session().get(
+            f"{SUPABASE_URL}/rest/v1/ordenes",
+            headers=HEADERS,
+            params={
+                "id": f"eq.{validated_id}",
+                "user_id": f"eq.{owner_user_id}",
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error en get_order_by_id_and_owner: {e}")
         return None
 
 
@@ -232,18 +286,18 @@ def update_payment_info(
         else:
             data["preference_id"] = payment_id
         
-        print(f"\n🔄 Actualizando información de pago para pedido {order_id}")
-        print(f"📌 Datos: {data}")
+        logger.info("Actualizando información de pago")
         
-        response = SESSION.patch(
-            f"{SUPABASE_URL}/rest/v1/ordenes?id=eq.{order_id}",
+        validated_id = _validate_uuid(str(order_id))
+        response = _session().patch(
+            f"{SUPABASE_URL}/rest/v1/ordenes",
             headers=HEADERS,
+            params={"id": f"eq.{validated_id}"},
             json=data,
             timeout=30,
         )
         
-        print("STATUS:", response.status_code)
-        print("BODY:", response.text)
+        logger.info("Supabase payment update status=%s", response.status_code)
         
         if response.status_code not in [200, 204]:
             logger.error(f"❌ Error actualizando pago: {response.text}")
